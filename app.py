@@ -126,12 +126,57 @@ async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
     pm.add_client(websocket)
     logger.info(f"Client connected: {websocket.client}")
+    
+    # Start streaming real data from rewards.npy
+    async def stream_data():
+        while True:
+            try:
+                import numpy as np
+                
+                # Try to load rewards from the training node
+                rewards_file = "/home/sree/ros2_ws/logs/rewards.npy"
+                
+                if os.path.exists(rewards_file):
+                    rewards = np.load(rewards_file).tolist()
+                    
+                    latest = rewards[-1] if rewards else 0
+                    progress = min(100, len(rewards) * 0.1)
+                    accuracy = progress / 100 if progress > 0 else 0
+                    
+                    await websocket.send_json({
+                        "reward": float(latest),
+                        "progress": float(progress),
+                        "accuracy": float(accuracy)
+                    })
+                else:
+                    # File doesn't exist yet - send zeros
+                    await websocket.send_json({
+                        "reward": 0,
+                        "progress": 0,
+                        "accuracy": 0
+                    })
+                
+            except Exception as e:
+                logger.error(f"WebSocket streaming error: {e}")
+                await websocket.send_json({
+                    "reward": 0,
+                    "progress": 0,
+                    "accuracy": 0
+                })
+            
+            await asyncio.sleep(1)
+    
     try:
         # Send initial status
         await websocket.send_json({"type": "status", "data": pm.get_status()})
+        
+        # Start data streaming task
+        stream_task = asyncio.create_task(stream_data())
+        
+        # Keep connection alive
         while True:
-            # Keep connection alive
             await websocket.receive_text()
+            
     except WebSocketDisconnect:
         pm.remove_client(websocket)
         logger.info(f"Client disconnected: {websocket.client}")

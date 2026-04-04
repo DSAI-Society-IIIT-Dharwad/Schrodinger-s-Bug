@@ -142,18 +142,18 @@ class ProcessManager:
                 pass
 
     async def start_ros(self):
+        """Start ROS2 daemon (NOT roscore - that's ROS1)"""
         if self.processes["ros"] and self.processes["ros"].returncode is None:
-            return False, "ROS is already running"
+            return False, "ROS2 is already running"
         
-        cmd = f'wsl -d {self.wsl_distro} bash -c "source /opt/ros/humble/setup.bash && roscore"' # or ros2 daemon?
-        # User specified: source /opt/ros/humble/setup.bash
-        # Let's use a simple keep-alive or just return success if the command starts
+        # ROS2 doesn't need roscore - just ensure the environment is sourced
         try:
+            cmd = f'wsl -d {self.wsl_distro} bash -c "source /opt/ros/humble/setup.bash && ros2 daemon start"'
             self.processes["ros"] = await asyncio.create_subprocess_shell(
                 cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
             )
-            asyncio.create_task(self._capture_logs(self.processes["ros"], "ROS"))
-            return True, "ROS Core initialized"
+            asyncio.create_task(self._capture_logs(self.processes["ros"], "ROS2"))
+            return True, "ROS2 Daemon initialized"
         except Exception as e:
             return False, str(e)
 
@@ -161,7 +161,7 @@ class ProcessManager:
         if self.processes["sim"] and self.processes["sim"].returncode is None:
             return False, "Simulation is already running"
         
-        # User requested: source and launch
+        # ROS2 launch command (NOT ros1)
         cmd = f'wsl -d {self.wsl_distro} bash -c "source /opt/ros/humble/setup.bash && export TURTLEBOT3_MODEL=burger && ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py"'
         try:
             self.processes["sim"] = await asyncio.create_subprocess_shell(
@@ -170,9 +170,6 @@ class ProcessManager:
             asyncio.create_task(self._capture_logs(self.processes["sim"], "GAZEBO"))
             
             # Start telemetry bridge node in WSL
-            tel_cmd = f'wsl -d {self.wsl_distro} bash -c "source /opt/ros/humble/setup.bash && python3 ~/ros2_ws/telemetry_node.py"'
-            # Note: I'll assume the user copies the files to ~/ros2_ws in WSL or I use the Windows path via /mnt/c
-            # Let's use the /mnt/c path to be safe and avoid extra copy steps
             win_path = "c/2026proj/DRL\\ ROBOT/backend/telemetry_node.py"
             tel_cmd = f'wsl -d {self.wsl_distro} bash -c "source /opt/ros/humble/setup.bash && python3 /mnt/{win_path}"'
             
@@ -210,7 +207,7 @@ class ProcessManager:
 
 
     async def stop_all(self):
-        # Kill everything in WSL
+        # Kill everything in WSL (ROS2 processes only - NO ROS1)
         import subprocess
         subprocess.run(f'wsl -d {self.wsl_distro} bash -c "killall -9 gzserver gzclient python3 ros2"', shell=True)
         
