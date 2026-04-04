@@ -22,3 +22,47 @@ dist-ssr
 *.njsproj
 *.sln
 *.sw?
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+
+# OS
+Thumbs.db
+
+# Jupyter
+.ipynb_checkpoints
+
+# PyTorch
+*.pth
+*.pt
+
+# NumPy
+*.npy
+
+# Testing
+.pytest_cache/
+.coverage
+htmlcov/
