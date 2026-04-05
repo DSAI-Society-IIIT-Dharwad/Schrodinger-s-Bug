@@ -22,34 +22,33 @@ export default function NeuralPage() {
 
   // When live metrics arrive, update telemetry state and graph
   useEffect(() => {
-    if (!liveMetrics || liveMetrics.type !== 'telemetry') return;
-    const data = liveMetrics.data;
+    if (!liveMetrics || liveMetrics.status === 'waiting') return;
     setTelemetry(prev => ({
       ...prev,
-      reward: data.reward ?? prev.reward,
-      episode: data.steps ?? prev.episode,
-      success_rate: data.success_rate ?? prev.success_rate,
-      collision: (data.collision_rate ?? 0) > 0,
-      state: data.phase ?? prev.state,
-      algorithm: data.algorithm ?? prev.algorithm,
-      progress: Math.min(100, (data.steps ?? 0) * 0.1),
-      accuracy: data.success_rate ?? prev.accuracy,
-      v: data.linear_v ?? prev.v,
-      distance: data.distance_to_goal ?? prev.distance,
+      reward: liveMetrics.reward ?? prev.reward,
+      episode: liveMetrics.episode ?? prev.episode,
+      success_rate: liveMetrics.success_rate ?? prev.success_rate,
+      collision: (liveMetrics.collisions ?? 0) > 0,
+      state: liveMetrics.phase ?? prev.state,
+      algorithm: liveMetrics.algorithm ?? prev.algorithm,
+      progress: Math.min(100, (liveMetrics.episode ?? 0) * 0.5),
+      accuracy: liveMetrics.success_rate ?? prev.accuracy,
+      v: liveMetrics.robot_x !== undefined ? Math.abs(liveMetrics.robot_x) : prev.v,
+      distance: liveMetrics.avg_reward ?? prev.distance,
     }));
 
     // Build graph data from reward_history
-    if (data.reward_history && data.reward_history.length > 0) {
-      const graphData = data.reward_history.map((r, i) => ({
+    if (liveMetrics.reward_history && liveMetrics.reward_history.length > 0) {
+      const graphData = liveMetrics.reward_history.map((r, i) => ({
         step: i,
-        ppo: data.algorithm === 'PPO' ? r : null,
-        td3: data.algorithm === 'TD3' ? r : null,
+        td3: liveMetrics.algorithm === 'TD3' ? r : null,
+        ppo: liveMetrics.algorithm === 'PPO' ? r : null,
       }));
       setMetrics(prev => ({ ...prev, graphData }));
     }
   }, [liveMetrics]);
   
-  // Legacy /ws connection for logs broadcast
+  // Legacy /ws connection for status/logs broadcast
   useEffect(() => {
     const socket = new WebSocket('ws://localhost:8000/ws');
     

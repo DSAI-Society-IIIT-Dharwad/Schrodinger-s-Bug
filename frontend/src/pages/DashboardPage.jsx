@@ -80,34 +80,41 @@ export default function DashboardPage() {
           if (msg.type === 'telemetry') {
             const data = msg.data;
             setReward(data.reward || 0);
-            setProgress(data.steps || 0);
-            setAccuracy(data.success_rate || 0);
+            setProgress(data.progress || 0);
+            setAccuracy(data.accuracy || 0);
             
-            // Update chart data for live graphing
+            setTelemetry(prev => ({
+              ...prev,
+              v: data.v ?? prev.v,
+              w: data.w ?? prev.w,
+              x: data.x ?? prev.x,
+              y: data.y ?? prev.y,
+              lidar: data.lidar ?? prev.lidar
+            }));
+
+            // Only update trajectory for mapping when moving
+            if (Math.abs(data.x) > 0.01 || Math.abs(data.y) > 0.01) {
+              setTrajectory(prev => [...prev, { x: data.x, y: data.y }].slice(-200));
+            }
+
             setChartData(prev => {
+               const last = prev[prev.length - 1];
                const newData = [...prev, { 
-                 time: data.steps, 
-                 ppo: data.reward,
-                 avg: data.avg_reward
+                 time: prev.length, 
+                 ppo: data.algo === 'ppo' ? data.reward : (last?.ppo || 0),
+                 td3: data.algo === 'td3' ? data.reward : (last?.td3 || 0)
                }].slice(-60);
                return newData;
             });
-
-            // Update telemetry state for other components
-            setTelemetry(prev => ({
-              ...prev,
-              v: data.linear_v || prev.v,
-              w: data.angular_v || prev.w,
-              distance: data.distance_to_goal || 0,
-              x: data.robot_x || 0,
-              y: data.robot_y || 0
-            }));
           } else if (msg.type === 'log') {
             addLog('drl', msg.data);
+          } else if (msg.type === 'status') {
+             setSimRunning(msg.data.sim === 'running');
+             setProcRunning(msg.data.train === 'running');
+             setTrainAlgorithm(msg.data.algo?.toUpperCase() || 'TD3');
+             setActiveScenario(msg.data.scenario || 'logistics');
           }
-        } catch (e) {
-          console.error("WS Parse Error:", e);
-        }
+        } catch (e) {}
       };
       
       ws.onclose = () => {
@@ -286,7 +293,7 @@ export default function DashboardPage() {
             {[
               { label: 'Cumulative Reward', value: reward.toFixed(2), color: 'text-emerald-400', unit: 'PTS' },
               { label: 'Model Accuracy', value: (accuracy * 100).toFixed(1), color: 'text-indigo-400', unit: '%' },
-              { label: 'Goal Distance', value: (telemetry.distance || 0).toFixed(2), color: 'text-rose-400', unit: 'm' },
+              { label: 'Current Velocity', value: telemetry.v.toFixed(2), color: 'text-violet-400', unit: 'm/s' },
             ].map(m => (
               <div key={m.label} className="hwi-glass p-8 rounded-[40px] group hover:border-white/20 transition-all border-white/5">
                 <div className="text-[9px] font-mono text-slate-500 uppercase tracking-widest mb-4 flex items-center justify-between">
