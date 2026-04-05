@@ -1,20 +1,18 @@
 import asyncio
 import json
-import logging
+import os
 import subprocess
-from typing import Dict, List, Optional
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+import logging
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
+from typing import Dict, List
 
-# --- Configuration ---
-WSL_DISTRO = "Ubuntu-22.04"
-WSL_BASE = ["wsl", "-d", WSL_DISTRO, "bash", "-c"]
-
+# Setup logging
 logging.basicConfig(level=logging.INFO)
-logger = logging.getLogger("schrödingers-bug")
+logger = logging.getLogger("backend")
 
-app = FastAPI(title="Schrödinger's Bug - Robotics Control Node")
+app = FastAPI()
 
 app.add_middleware(
     CORSMiddleware,
@@ -24,155 +22,122 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# --- Process State ---
-class SystemState:
-    def __init__(self):
-        self.active_processes: Dict[str, asyncio.subprocess.Process] = {}
-        self.mode = "manual" # manual, training, inference
-        self.scenario = "logistics" # healthcare, defence, logistics
-        self.logs: List[str] = []
-        self.telemetry = {
-            "reward": 0.0,
-            "collision": False,
-            "distance": 0.0,
-            "success": False,
-            "v": 0.0,
-            "w": 0.0
-        }
+class LaunchRequest(BaseModel):
+    algo: str = "ppo"
 
-state = SystemState()
+# Metrics history storage for the comparison page
+history = {
+    "ppo": [],
+    "td3": []
+}
 
-# --- WebSocket Hub ---
 class ConnectionManager:
     def __init__(self):
         self.active_connections: List[WebSocket] = []
-
+        
     async def connect(self, websocket: WebSocket):
         await websocket.accept()
         self.active_connections.append(websocket)
-
+        
     def disconnect(self, websocket: WebSocket):
-        self.active_connections.remove(websocket)
-
+        if websocket in self.active_connections:
+            self.active_connections.remove(websocket)
+            
     async def broadcast(self, message: dict):
-        # Create a copy of the list to avoid modifying it while iterating
-        for connection in list(self.active_connections):
+        for connection in self.active_connections:
             try:
                 await connection.send_json(message)
-            except Exception:
-                if connection in self.active_connections:
-                    self.active_connections.remove(connection)
+            except Exception as e:
+                logger.error(f"Broadcast error: {e}")
 
-manager = ConnectionManager()
+ppo_manager = ConnectionManager()
+td3_manager = ConnectionManager()
 
-# --- WSL Executor ---
-async def run_wsl_persistent(name: str, cmd: str):
-    full_cmd = " ".join(WSL_BASE + [f'"{cmd}"'])
-    try:
-        proc = await asyncio.create_subprocess_shell(
-            full_cmd,
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.STDOUT
-        )
-        state.active_processes[name] = proc
-        # Start a task to read logs and broadcast
-        asyncio.create_task(log_reader(name, proc))
-        return True
-    except Exception as e:
-        logger.error(f"Failed to run WSL cmd '{name}': {e}")
-        return False
-
-async def log_reader(name: str, proc: asyncio.subprocess.Process):
-    while True:
+def read_metrics_file(filename: str):
+    if os.path.exists(filename):
         try:
-            line = await proc.stdout.readline()
-            if not line:
-                break
-            clean_line = line.decode('utf-8', errors='replace').strip()
-            if clean_line:
-                log_msg = f"[{name}] {clean_line}"
-                state.logs.append(log_msg)
-                
-                # Check if line is telemetry JSON
-                if clean_line.startswith("{") and clean_line.endswith("}"):
-                    try:
-                        tel_data = json.loads(clean_line)
-                        state.telemetry.update(tel_data)
-                        await manager.broadcast({"type": "telemetry", "data": state.telemetry})
-                    except:
-                        pass
-                else:
-                    await manager.broadcast({"type": "log", "data": log_msg})
-                    
-                if len(state.logs) > 500: state.logs.pop(0)
+            with open(filename, 'r') as f:
+                data = json.load(f)
+                return data
         except Exception as e:
-            logger.error(f"Error reading log: {e}")
-            break
-            
-    await proc.wait()
-    if name in state.active_processes:
-        del state.active_processes[name]
-    await manager.broadcast({"type": "status", "data": {"process": name, "status": "exited"}})
+            logger.error(f"Error reading {filename}: {e}")
+            return None
+    return None
 
-# --- API Endpoints ---
-@app.post("/start-system")
-async def start_system():
-    # Kill any existing processes
-    subprocess.run(WSL_BASE + ["bash ~/stop_system.sh"], capture_output=True)
-    state.active_processes.clear()
+@app.get("/compare")
+async def get_compare():
+    ppo_latest = read_metrics_file("ppo_metrics.json")
+    td3_latest = read_metrics_file("td3_metrics.json")
     
-    success = await run_wsl_persistent("ENGINE", "bash ~/start_system.sh")
-    if success:
-        return {"status": "success", "message": "Schrödinger's Bug System Initialized"}
-    raise HTTPException(status_code=500, detail="WSL Launch Failed")
+    return {
+        "ppo": ppo_latest,
+        "td3": td3_latest,
+        "history": history
+    }
 
-@app.post("/stop-system")
-async def stop_system():
-    subprocess.run(WSL_BASE + ["bash ~/stop_system.sh"], capture_output=True)
+@app.post("/launch-system")
+async def launch_system(req: LaunchRequest):
+    algo = req.algo.lower()
+    if algo not in ["ppo", "td3"]:
+        return {"status": "error", "message": "Invalid algorithm"}
     
-    # Terminate tracked processes
-    for name, proc in list(state.active_processes.items()):
-        try:
-            proc.terminate()
-        except:
-            pass
-    state.active_processes.clear()
-    return {"status": "success", "message": "System Halted Safe"}
-
-class ModeRequest(BaseModel):
-    mode: str
-
-@app.post("/set-mode")
-async def set_mode(req: ModeRequest):
-    if req.mode not in ["manual", "training", "inference"]:
-        raise HTTPException(status_code=400, detail="Invalid Mode")
-    state.mode = req.mode
-    logger.info(f"Mode switched to: {state.mode}")
-    return {"status": "success", "mode": state.mode}
-
-class ScenarioRequest(BaseModel):
-    scenario: str
-
-@app.post("/set-scenario")
-async def set_scenario(req: ScenarioRequest):
-    if req.scenario not in ["healthcare", "defence", "logistics"]:
-        raise HTTPException(status_code=400, detail="Invalid Scenario")
-    state.scenario = req.scenario
-    logger.info(f"Scenario switched to: {state.scenario}")
-    return {"status": "success", "scenario": state.scenario}
-
-@app.websocket("/ws")
-async def websocket_endpoint(websocket: WebSocket):
-    await manager.connect(websocket)
+    # We call the launch_system.sh script with the selected algo
+    # Using 'bash' explicitly for WSL compatibility if needed, 
+    # but the script itself is in the parent dir.
+    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    launch_script = os.path.join(base_dir, "launch_system.sh")
+    
     try:
-        # Send initial state
-        await websocket.send_json({"type": "init", "logs": state.logs, "telemetry": state.telemetry, "mode": state.mode})
+        # We run the orchestrator as a background process
+        # This allows the backend to remain responsive
+        cmd = f"bash {launch_script} {algo}"
+        subprocess.Popen(["bash", "-c", cmd], preexec_fn=os.setpgrp)
+        return {"status": "success", "message": f"Orchestrator ignited with {algo}"}
+    except Exception as e:
+        logger.error(f"Launch failed: {e}")
+        return {"status": "error", "message": str(e)}
+
+async def telemetry_loop():
+    while True:
+        # PPO Telemetry
+        data_ppo = read_metrics_file("ppo_metrics.json")
+        if data_ppo:
+            await ppo_manager.broadcast({"type": "telemetry", "data": data_ppo})
+            # Track history (keep last 100 points)
+            history["ppo"].append(data_ppo)
+            history["ppo"] = history["ppo"][-100:]
+            
+        # TD3 Telemetry
+        data_td3 = read_metrics_file("td3_metrics.json")
+        if data_td3:
+            await td3_manager.broadcast({"type": "telemetry", "data": data_td3})
+            # Track history
+            history["td3"].append(data_td3)
+            history["td3"] = history["td3"][-100:]
+            
+        await asyncio.sleep(1.0)
+
+@app.on_event("startup")
+async def startup():
+    asyncio.create_task(telemetry_loop())
+
+@app.websocket("/ws/ppo")
+async def ppo_websocket(websocket: WebSocket):
+    await ppo_manager.connect(websocket)
+    try:
         while True:
-            data = await websocket.receive_text()
-            # Handle incoming signals if needed
-            pass
+            await websocket.receive_text()
     except WebSocketDisconnect:
-        manager.disconnect(websocket)
+        ppo_manager.disconnect(websocket)
+
+@app.websocket("/ws/td3")
+async def td3_websocket(websocket: WebSocket):
+    await td3_manager.connect(websocket)
+    try:
+        while True:
+            await websocket.receive_text()
+    except WebSocketDisconnect:
+        td3_manager.disconnect(websocket)
 
 if __name__ == "__main__":
     import uvicorn
