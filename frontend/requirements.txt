@@ -1,7 +1,0 @@
-fastapi
-uvicorn
-websockets
-psutil
-python-multipart
-torch
-numpy
