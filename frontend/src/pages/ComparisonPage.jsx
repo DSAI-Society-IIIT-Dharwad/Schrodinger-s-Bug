@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useMemo } from 'react';
 import { 
   LineChart, Line, BarChart, Bar, XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend, Cell
 } from 'recharts';
@@ -6,7 +6,7 @@ import { useAlgoWebSocket } from '../hooks/useAlgoWebSocket';
 import { motion } from 'framer-motion';
 import { GitCompare, Trophy, Zap, AlertTriangle, Activity, BarChart3 } from 'lucide-react';
 import axios from 'axios';
-import { BACKEND_URL } from '../utils';
+import { BACKEND_URL, generateEpisodeData } from '../utils';
 
 export default function ComparisonPage() {
   const ppo = useAlgoWebSocket('ppo');
@@ -30,15 +30,22 @@ export default function ComparisonPage() {
     return () => clearInterval(interval);
   }, []);
 
+  // Pre-seed mock history for demo
+  const mockPPO = useMemo(() => generateEpisodeData(50, 0.4), []);
+  const mockTD3 = useMemo(() => generateEpisodeData(50, 0.6), []);
+
   const combinedData = [];
-  const maxLen = Math.max(history.ppo.length, history.td3.length);
+  const ppoSrc = history.ppo.length > 0 ? history.ppo : mockPPO;
+  const td3Src = history.td3.length > 0 ? history.td3 : mockTD3;
+  
+  const maxLen = Math.max(ppoSrc.length, td3Src.length);
   for (let i = 0; i < maxLen; i++) {
     combinedData.push({
       index: i,
-      ppo_reward: history.ppo[i]?.reward || 0,
-      td3_reward: history.td3[i]?.reward || 0,
-      ppo_avg: history.ppo[i]?.avg_reward || 0,
-      td3_avg: history.td3[i]?.avg_reward || 0,
+      ppo_reward: ppoSrc[i]?.reward || 0,
+      td3_reward: td3Src[i]?.reward || 0,
+      ppo_avg: ppoSrc[i]?.avg_reward || 0,
+      td3_avg: td3Src[i]?.avg_reward || 0,
     });
   }
 

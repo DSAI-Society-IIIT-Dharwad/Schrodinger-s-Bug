@@ -1,56 +1,20 @@
 import React, { useState, useEffect, useMemo } from 'react';
 import { motion } from 'framer-motion';
-import { CheckCircle2, Terminal, Target, Activity, Cpu } from 'lucide-react';
+import { CheckCircle2, Terminal, Target, Activity, Cpu, Globe, Rocket } from 'lucide-react';
 import { ResponsiveContainer, AreaChart, Area, CartesianGrid, XAxis, YAxis, Tooltip, LineChart, Line } from 'recharts';
-import axios from 'axios';
-import { BACKEND_URL, generateEpisodeData } from '../utils';
+import { useAlgoWebSocket } from '../hooks/useAlgoWebSocket';
+import { generateEpisodeData } from '../utils';
 import RadarView from '../components/RadarView';
 
 export default function AnalyticsPage() {
-  const [history, setHistory] = useState([]);
-  const [telemetry, setTelemetry] = useState({ x: 0, y: 0, reward: 0, collision: false, velocity: 0, episode: 0, latency: 0 });
+  const { metrics: telemetry, chartHistory: liveHistory, isConnected, isDemoMode } = useAlgoWebSocket('ppo');
   const [logs, setLogs] = useState([]);
-  const mockData = useMemo(() => generateEpisodeData(100), []);
-
-  useEffect(() => {
-    const fetchData = async () => {
-      try {
-        const [hRes, tRes, lRes] = await Promise.all([
-          axios.get(`${BACKEND_URL}/history`),
-          axios.get(`${BACKEND_URL}/telemetry`),
-          axios.get(`${BACKEND_URL}/logs?last=15`)
-        ]);
-        
-        if (hRes.data.history) setHistory(hRes.data.history);
-        if (tRes.data) setTelemetry(tRes.data);
-        if (lRes.data.logs) setLogs(lRes.data.logs);
-      } catch (e) {
-        console.error("Analytics fetch failed:", e);
-      }
-    };
-
-    fetchData();
-
-    const socket = new WebSocket('ws://localhost:8000/ws');
-    
-    socket.onmessage = (event) => {
-      const msg = JSON.parse(event.data);
-      if (msg.type === 'telemetry') {
-        setTelemetry(msg.data);
-        // Update local history if needed, or let the next fetch handle it
-      } else if (msg.type === 'log') {
-        setLogs(prev => [msg.data, ...prev].slice(0, 20));
-      } else if (msg.type === 'status') {
-        // Handle status if needed
-      }
-    };
-
-    return () => socket.close();
-  }, []);
-
-
-  const chartData = history.length > 0 ? history : mockData;
-  const latest = history.length > 0 ? history[history.length - 1] : { reward: 0, success_rate: 0, loss: 0.5, episode: 0 };
+  
+  // High-fidelity historical seed
+  const mockHistory = useMemo(() => generateEpisodeData(100), []);
+  
+  const chartData = liveHistory.length > 0 ? liveHistory : mockHistory;
+  const latest = chartData[chartData.length - 1] || { reward: 0, success_rate: 0, loss: 0.5, episode: 0 };
 
   return (
     <div className="p-4 lg:p-8 max-w-[1600px] mx-auto space-y-6">
@@ -143,9 +107,9 @@ export default function AnalyticsPage() {
           {/* Main Stat Strip */}
           <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
             {[
-              { label: 'Reward', value: latest.reward > 0 ? `+${latest.reward}` : latest.reward, icon: <Target className="w-4 h-4" />, color: 'text-emerald-400' },
-              { label: 'Success %', value: `${latest.success_rate}%`, icon: <CheckCircle2 className="w-4 h-4" />, color: 'text-cyan-400' },
-              { label: 'Policy Loss', value: latest.loss, icon: <Activity className="w-4 h-4" />, color: 'text-amber-400' },
+              { label: 'Reward', value: (latest.reward || 0).toFixed(2), icon: <Target className="w-4 h-4" />, color: 'text-emerald-400' },
+              { label: 'Success %', value: `${(latest.success_rate || 0).toFixed(2)}%`, icon: <CheckCircle2 className="w-4 h-4" />, color: 'text-cyan-400' },
+              { label: 'Policy Loss', value: (latest.loss || 0).toFixed(4), icon: <Activity className="w-4 h-4" />, color: 'text-amber-400' },
               { label: 'Episode', value: latest.episode || 100, icon: <Cpu className="w-4 h-4" />, color: 'text-indigo-400' },
             ].map(s => (
               <div key={s.label} className="glass-card p-5 relative overflow-hidden group">

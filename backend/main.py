@@ -81,18 +81,29 @@ async def launch_system(req: LaunchRequest):
     if algo not in ["ppo", "td3"]:
         return {"status": "error", "message": "Invalid algorithm"}
     
-    # We call the launch_system.sh script with the selected algo
-    # Using 'bash' explicitly for WSL compatibility if needed, 
-    # but the script itself is in the parent dir.
-    base_dir = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    launch_script = os.path.join(base_dir, "launch_system.sh")
+    # Locate the launch script (Parent directory of backend/)
+    backend_dir = os.path.dirname(os.path.abspath(__file__))
+    root_dir = os.path.dirname(backend_dir)
+    launch_script = os.path.join(root_dir, "launch_system.sh")
     
     try:
-        # We run the orchestrator as a background process
-        # This allows the backend to remain responsive
-        cmd = f"bash {launch_script} {algo}"
-        subprocess.Popen(["bash", "-c", cmd], preexec_fn=os.setpgrp)
-        return {"status": "success", "message": f"Orchestrator ignited with {algo}"}
+        # Determine the execution environment
+        is_windows = os.name == 'nt'
+        
+        if is_windows:
+            # On Windows, we bridge to WSL. Convert script path to WSL format: C:\ -> /mnt/c/
+            wsl_script_path = launch_script.replace('\\', '/').replace('C:', '/mnt/c').replace('c:', '/mnt/c')
+            
+            # Explicitly pass DISPLAY and use a login shell for better environment sourcing
+            cmd = ["wsl", "bash", "-c", f"export DISPLAY=:0 && export LIBGL_ALWAYS_SOFTWARE=1 && bash '{wsl_script_path}' {algo}"]
+            subprocess.Popen(cmd, creationflags=subprocess.CREATE_NEW_PROCESS_GROUP)
+        else:
+            # Native Linux/WSL execution
+            cmd = ["bash", launch_script, algo]
+            subprocess.Popen(cmd, preexec_fn=os.setpgrp)
+            
+        logger.info(f"System Ignition successful with: {cmd}")
+        return {"status": "success", "message": f"Orchestrator ignited with {algo}. Check for Gazebo window."}
     except Exception as e:
         logger.error(f"Launch failed: {e}")
         return {"status": "error", "message": str(e)}

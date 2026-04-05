@@ -9,13 +9,58 @@ export const BACKEND_URL = 'http://localhost:8000';
 export const SOCKET_URL = 'ws://localhost:8000/ws';
 
 
-export const generateEpisodeData = (count) => {
-  return Array.from({ length: count }).map((_, i) => ({
-    episode: i + 1,
-    reward: -100 + (Math.log(i + 1) * 35) + Math.sin(i / 5) * 15 + (Math.random() * 10),
-    success_rate: Math.min(100, Math.pow(i / count, 0.6) * 105 + Math.random() * 5),
-    loss: Math.max(0.01, 0.5 - (i * 0.005) + Math.random() * 0.03),
-  }));
+export const generateEpisodeData = (count = 100) => {
+  return Array.from({ length: count }).map((_, i) => {
+    const progress = i / count;
+    const baseReward = -150 + (progress * 280);
+    const noise = (Math.sin(i / 3) * 15) + (Math.random() * 25);
+    const success = Math.min(100, (progress * 85) + 15 + (Math.random() * 10));
+    
+    return {
+      episode: i + 1,
+      reward: baseReward + noise,
+      avg_reward: baseReward + (noise / 2),
+      success_rate: success,
+      collision_rate: Math.max(0, 0.4 - (progress * 0.35) + (Math.random() * 0.05)),
+      steps: Math.floor(400 - (progress * 250) + (Math.random() * 50))
+    };
+  });
+};
+
+export const generateMockTelemetry = (step, algo = 'ppo') => {
+  const isPPO = algo === 'ppo';
+  const progress = (step % 500) / 500;
+  const time = Date.now() / 1000;
+  
+  // Calculate dynamic X, Y for trajectory (circular path)
+  const radius = 2.5;
+  const angle = progress * Math.PI * 2;
+  const x = radius * Math.sqrt(progress) * Math.cos(angle);
+  const y = radius * Math.sqrt(progress) * Math.sin(angle);
+
+  return {
+    type: 'telemetry',
+    data: {
+      reward: (isPPO ? 40 : 55) + Math.random() * 5 + (progress * 20),
+      avg_reward: (isPPO ? 38 : 52) + (progress * 15),
+      steps: step,
+      collision_rate: Math.max(0, 0.05 - (progress * 0.04)),
+      success_rate: Math.min(100, (isPPO ? 92 : 98) + (progress * 5)),
+      x,
+      y,
+      timestamp: time,
+      v_value: Math.sin(progress * 10) * 5,
+      q_value: Math.cos(progress * 10) * 10,
+      action_linear: 0.15 + Math.random() * 0.05,
+      action_angular: Math.sin(progress * 20) * 0.5,
+      scan: Array.from({ length: 24 }).map((_, i) => {
+        const base = 2.0;
+        const scanAngle = (i / 24) * Math.PI * 2;
+        const obstacle = Math.sin(angle + scanAngle) > 0.8 ? 0.5 : base;
+        return obstacle + Math.random() * 0.2;
+      })
+    }
+  };
 };
 
 export const TECH_STACK = [
