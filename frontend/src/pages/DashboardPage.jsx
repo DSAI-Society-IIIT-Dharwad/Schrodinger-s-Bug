@@ -233,54 +233,100 @@ export default function DashboardPage() {
         {/* ── LEFT COLUMN: Tactical & Scenarios ── */}
         <section className="col-span-12 lg:col-span-4 space-y-8">
           {/* Mission Scenarios */}
-          <div className="hwi-glass p-8 rounded-[40px] tactical-border">
-            <h3 className="text-[9px] font-mono font-bold uppercase tracking-[0.4em] text-indigo-400 mb-6">Mission Selection</h3>
+          <div className="hwi-glass p-8 rounded-[40px] tactical-border hover:border-indigo-500/20 transition-all duration-300">
+            <h3 className="text-[9px] font-mono font-bold uppercase tracking-[0.4em] text-indigo-400 mb-6 flex items-center gap-2">
+              <span className="w-1.5 h-1.5 bg-indigo-500 rounded-full" />
+              Mission Selection
+            </h3>
             <div className="grid grid-cols-1 gap-3">
               {[
-                { id: 'logistics', name: 'Logistics', icon: '📦', world: 'World' },
-                { id: 'healthcare', name: 'Healthcare', icon: '🏥', world: 'House' },
-                { id: 'defense', name: 'Defense', icon: '🛡️', world: 'Stage 4' }
+                { id: 'logistics', name: 'Logistics', icon: '📦', world: 'World', desc: 'Efficient pathing' },
+                { id: 'healthcare', name: 'Healthcare', icon: '🏥', world: 'House', desc: 'Soft navigation' },
+                { id: 'defense', name: 'Defense', icon: '🛡️', world: 'Stage 4', desc: 'Tactical assault' }
               ].map(s => (
                 <button key={s.id} onClick={() => handleScenarioChange(s.id)}
-                  className={`flex items-center justify-between p-4 rounded-3xl border transition-all ${activeScenario === s.id ? 'bg-indigo-500/10 border-indigo-500/40 text-white' : 'bg-white/[0.02] border-white/5 text-slate-500 hover:border-white/20'}`}>
+                  className={`group flex items-center justify-between p-5 rounded-3xl border transition-all duration-300 ${
+                    activeScenario === s.id 
+                      ? 'bg-gradient-to-r from-indigo-500/20 to-violet-500/10 border-indigo-500/50 text-white shadow-lg shadow-indigo-500/20 scale-[1.02]' 
+                      : 'bg-white/[0.02] border-white/5 text-slate-500 hover:border-white/20 hover:bg-white/[0.04] hover:scale-[1.01]'
+                  }`}>
                   <div className="flex items-center gap-4">
-                    <span className="text-xl grayscale opacity-50 group-hover:grayscale-0">{s.icon}</span>
+                    <span className={`text-2xl transition-all duration-300 ${activeScenario === s.id ? 'grayscale-0 scale-110' : 'grayscale opacity-50 group-hover:grayscale-0 group-hover:opacity-100'}`}>
+                      {s.icon}
+                    </span>
                     <div className="text-left">
                       <div className="text-[11px] font-bold uppercase leading-none">{s.name}</div>
-                      <div className="text-[9px] font-mono opacity-40 mt-1">MAP: {s.world}</div>
+                      <div className="text-[9px] font-mono opacity-40 mt-1">{s.desc}</div>
                     </div>
                   </div>
-                  {activeScenario === s.id && <div className="w-1.5 h-1.5 rounded-full bg-indigo-500 glow-dot" />}
+                  <div className="flex items-center gap-3">
+                    <div className="text-[8px] font-mono opacity-30 uppercase">MAP: {s.world}</div>
+                    {activeScenario === s.id && (
+                      <div className="w-2 h-2 rounded-full bg-indigo-500 glow-dot shadow-[0_0_10px_rgba(99,102,241,0.8)]" />
+                    )}
+                  </div>
                 </button>
               ))}
             </div>
           </div>
 
           {/* Ignition Control */}
-          <div className="hwi-glass p-8 rounded-[40px] relative overflow-hidden hud-scanline">
+          <div className="hwi-glass p-8 rounded-[40px] relative overflow-hidden hud-scanline hover:border-white/10 transition-all duration-300">
              <div className="space-y-4 mb-8">
                <button disabled={simRunning || simLoading} onClick={handleLaunchSim}
-                 className={`w-full py-5 rounded-3xl font-black text-sm uppercase tracking-widest transition-all ${simRunning ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'glow-button-indigo text-white'}`}>
-                 {simRunning ? '✓ Sim Engine Online' : simLoading ? 'Processing...' : '🚀 Launch Environment'}
+                 className={`group w-full py-5 rounded-3xl font-black text-sm uppercase tracking-widest transition-all duration-300 relative overflow-hidden ${
+                   simRunning 
+                     ? 'bg-gradient-to-r from-emerald-500/20 to-emerald-600/10 text-emerald-400 border-2 border-emerald-500/40 shadow-lg shadow-emerald-500/20' 
+                     : simLoading
+                     ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 cursor-wait'
+                     : 'glow-button-indigo text-white hover:scale-[1.02] hover:shadow-2xl hover:shadow-indigo-500/30'
+                 }`}>
+                 {simRunning && (
+                   <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+                 )}
+                 <span className="relative z-10 flex items-center justify-center gap-2">
+                   {simRunning ? '✓ Sim Engine Online' : simLoading ? '⏳ Processing...' : '🚀 Launch Environment'}
+                 </span>
                </button>
                
                <div className="flex gap-3">
                  {['PPO', 'TD3'].map(algo => (
                    <button key={algo} onClick={() => handleAlgorithmChange(algo)}
-                     className={`flex-1 py-3 rounded-2xl text-[10px] font-bold border transition-all ${trainAlgorithm === algo ? 'bg-indigo-500/10 border-indigo-500/40 text-white' : 'border-white/5 text-slate-500 hover:text-slate-300'}`}>
+                     className={`flex-1 py-3 rounded-2xl text-[10px] font-bold border transition-all duration-300 ${
+                       trainAlgorithm === algo 
+                         ? 'bg-gradient-to-br from-indigo-500/20 to-violet-500/10 border-indigo-500/50 text-white shadow-lg shadow-indigo-500/20 scale-105' 
+                         : 'border-white/5 text-slate-500 hover:text-slate-300 hover:border-white/20 hover:bg-white/[0.02]'
+                     }`}>
                      {algo}
                    </button>
                  ))}
                </div>
 
                <button disabled={!simRunning || procRunning || procLoading} onClick={handleStartProcess}
-                 className={`w-full py-5 rounded-3xl font-black text-sm uppercase tracking-widest transition-all ${procRunning ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'glow-button-emerald text-white'}`}>
-                 {procRunning ? '✓ Runtime Loaded' : procLoading ? 'Loading Weights...' : `⚡ Start ${systemMode === 'testing' ? 'Inference' : 'Training'}`}
+                 className={`group w-full py-5 rounded-3xl font-black text-sm uppercase tracking-widest transition-all duration-300 relative overflow-hidden ${
+                   procRunning 
+                     ? 'bg-gradient-to-r from-emerald-500/20 to-emerald-600/10 text-emerald-400 border-2 border-emerald-500/40 shadow-lg shadow-emerald-500/20' 
+                     : procLoading
+                     ? 'bg-indigo-500/20 text-indigo-300 border border-indigo-500/30 cursor-wait'
+                     : !simRunning
+                     ? 'bg-white/[0.02] text-slate-600 border border-white/5 cursor-not-allowed opacity-50'
+                     : 'glow-button-emerald text-white hover:scale-[1.02] hover:shadow-2xl hover:shadow-emerald-500/30'
+                 }`}>
+                 {procRunning && (
+                   <span className="absolute inset-0 bg-gradient-to-r from-transparent via-white/10 to-transparent -translate-x-full group-hover:translate-x-full transition-transform duration-1000" />
+                 )}
+                 <span className="relative z-10 flex items-center justify-center gap-2">
+                   {procRunning ? '✓ Runtime Loaded' : procLoading ? '⏳ Loading Weights...' : `⚡ Start ${systemMode === 'testing' ? 'Inference' : 'Training'}`}
+                 </span>
                </button>
              </div>
 
-             <button onClick={handleHalt} className="w-full py-4 rounded-3xl border border-rose-500/20 text-rose-500 text-[10px] font-bold uppercase tracking-widest hover:bg-rose-500/10 transition-all">
-               Emergency Standby
+             <button onClick={handleHalt} 
+               className="group w-full py-4 rounded-3xl border-2 border-rose-500/30 text-rose-500 text-[10px] font-bold uppercase tracking-widest hover:bg-rose-500/10 hover:border-rose-500/50 hover:shadow-lg hover:shadow-rose-500/20 transition-all duration-300 hover:scale-[1.02]">
+               <span className="flex items-center justify-center gap-2">
+                 <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse" />
+                 Emergency Standby
+               </span>
              </button>
           </div>
 
@@ -291,49 +337,112 @@ export default function DashboardPage() {
         <section className="col-span-12 lg:col-span-8 space-y-10">
           <div className="grid grid-cols-1 md:grid-cols-3 gap-8">
             {[
-              { label: 'Cumulative Reward', value: reward.toFixed(2), color: 'text-emerald-400', unit: 'PTS' },
-              { label: 'Model Accuracy', value: (accuracy * 100).toFixed(1), color: 'text-indigo-400', unit: '%' },
-              { label: 'Current Velocity', value: telemetry.v.toFixed(2), color: 'text-violet-400', unit: 'm/s' },
-            ].map(m => (
-              <div key={m.label} className="hwi-glass p-8 rounded-[40px] group hover:border-white/20 transition-all border-white/5">
+              { label: 'Cumulative Reward', value: reward.toFixed(2), color: 'text-emerald-400', unit: 'PTS', icon: '📊' },
+              { label: 'Model Accuracy', value: (accuracy * 100).toFixed(1), color: 'text-indigo-400', unit: '%', icon: '🎯' },
+              { label: 'Current Velocity', value: telemetry.v.toFixed(2), color: 'text-violet-400', unit: 'm/s', icon: '⚡' },
+            ].map((m, idx) => (
+              <div key={m.label} className="hwi-glass p-8 rounded-[40px] group hover:border-white/20 transition-all duration-300 border-white/5 hover:transform hover:scale-105 hover:shadow-2xl hover:shadow-indigo-500/10 relative overflow-hidden">
+                {/* Animated background gradient */}
+                <div className={`absolute inset-0 opacity-0 group-hover:opacity-10 transition-opacity duration-500 bg-gradient-to-br ${idx === 0 ? 'from-emerald-500' : idx === 1 ? 'from-indigo-500' : 'from-violet-500'} to-transparent`} />
+                
                 <div className="text-[9px] font-mono text-slate-500 uppercase tracking-widest mb-4 flex items-center justify-between">
-                  {m.label}
-                  <div className="w-1.5 h-1.5 rounded-full bg-white/5" />
+                  <span className="flex items-center gap-2">
+                    <span className="text-lg">{m.icon}</span>
+                    {m.label}
+                  </span>
+                  <div className={`w-1.5 h-1.5 rounded-full ${backendOnline ? 'bg-emerald-500 animate-pulse' : 'bg-white/5'}`} />
                 </div>
-                <div className="flex items-baseline gap-2">
-                  <span className={`text-4xl font-black ${m.color} tracking-tighter`}>{m.value}</span>
+                <div className="flex items-baseline gap-2 relative z-10">
+                  <span className={`text-5xl font-black ${m.color} tracking-tighter transition-all duration-300 group-hover:scale-110`}>{m.value}</span>
                   <span className="text-[10px] font-mono text-slate-500">{m.unit}</span>
                 </div>
+                
+                {/* Progress bar for accuracy */}
+                {m.label === 'Model Accuracy' && (
+                  <div className="mt-4 h-1 bg-white/5 rounded-full overflow-hidden">
+                    <div 
+                      className="h-full bg-indigo-500 transition-all duration-500 ease-out"
+                      style={{ width: `${accuracy * 100}%` }}
+                    />
+                  </div>
+                )}
               </div>
             ))}
           </div>
 
           <div className="grid grid-cols-12 gap-8">
             {/* Real-time Trajectory Map */}
-            <div className="col-span-12 lg:col-span-7 hwi-glass rounded-[40px] p-8 h-[450px] flex flex-col border-white/5">
-               <h3 className="text-[9px] font-mono font-bold uppercase tracking-[0.4em] text-indigo-400 mb-8">Path Trajectory [X, Y]</h3>
-               <div className="flex-1 relative bg-black/30 rounded-3xl overflow-hidden border border-white/5">
-                 <svg viewBox="-4 -4 8 8" className="w-full h-full transform scale-y-[-1]">
+            <div className="col-span-12 lg:col-span-7 hwi-glass rounded-[40px] p-8 h-[450px] flex flex-col border-white/5 hover:border-indigo-500/20 transition-all duration-300">
+               <h3 className="text-[9px] font-mono font-bold uppercase tracking-[0.4em] text-indigo-400 mb-8 flex items-center gap-3">
+                 <span className="w-2 h-2 bg-indigo-500 rounded-full animate-pulse" />
+                 Path Trajectory [X, Y]
+                 {trajectory.length > 0 && (
+                   <span className="ml-auto text-[8px] text-slate-500 normal-case tracking-normal">
+                     {trajectory.length} points
+                   </span>
+                 )}
+               </h3>
+               <div className="flex-1 relative bg-gradient-to-br from-black/40 to-indigo-500/5 rounded-3xl overflow-hidden border border-white/10 shadow-inner">
+                 {/* Grid overlay */}
+                 <div className="absolute inset-0 opacity-20" 
+                      style={{
+                        backgroundImage: 'linear-gradient(rgba(99, 102, 241, 0.1) 1px, transparent 1px), linear-gradient(90deg, rgba(99, 102, 241, 0.1) 1px, transparent 1px)',
+                        backgroundSize: '20px 20px'
+                      }}
+                 />
+                 
+                 <svg viewBox="-4 -4 8 8" className="w-full h-full transform scale-y-[-1] relative z-10">
                     {/* Grid lines */}
-                    <path d="M-4 0 L4 0 M0 -4 L0 4" stroke="white" strokeWidth="0.02" strokeOpacity="0.1" />
-                    {/* Robot path */}
-                    <polyline
-                      points={trajectory.map(p => `${p.x},${p.y}`).join(' ')}
-                      fill="none"
-                      stroke="#6366f1"
-                      strokeWidth="0.05"
-                      strokeLinecap="round"
-                      strokeLinejoin="round"
-                      className="trajectory-path"
-                    />
-                    {/* Current position */}
+                    <path d="M-4 0 L4 0 M0 -4 L0 4" stroke="white" strokeWidth="0.02" strokeOpacity="0.2" />
+                    
+                    {/* Circular range indicators */}
+                    {[1, 2, 3].map(radius => (
+                      <circle key={radius} cx="0" cy="0" r={radius} fill="none" stroke="white" strokeWidth="0.01" strokeOpacity="0.05" strokeDasharray="0.1 0.1" />
+                    ))}
+                    
+                    {/* Robot path with gradient */}
+                    {trajectory.length > 1 && (
+                      <>
+                        <defs>
+                          <linearGradient id="pathGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                            <stop offset="0%" stopColor="#6366f1" stopOpacity="0.3" />
+                            <stop offset="100%" stopColor="#6366f1" stopOpacity="1" />
+                          </linearGradient>
+                        </defs>
+                        <polyline
+                          points={trajectory.map(p => `${p.x},${p.y}`).join(' ')}
+                          fill="none"
+                          stroke="url(#pathGradient)"
+                          strokeWidth="0.06"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                          className="trajectory-path"
+                          style={{
+                            filter: 'drop-shadow(0 0 4px rgba(99, 102, 241, 0.6))'
+                          }}
+                        />
+                      </>
+                    )}
+                    
+                    {/* Current position with pulse effect */}
                     {telemetry.x && (
-                      <circle cx={telemetry.x} cy={telemetry.y} r="0.1" fill="#6366f1" className="animate-pulse" />
+                      <g>
+                        <circle cx={telemetry.x} cy={telemetry.y} r="0.2" fill="#6366f1" opacity="0.3" className="animate-ping" />
+                        <circle cx={telemetry.x} cy={telemetry.y} r="0.12" fill="#6366f1" className="animate-pulse" />
+                        <circle cx={telemetry.x} cy={telemetry.y} r="0.08" fill="white" />
+                      </g>
+                    )}
+                    
+                    {/* Start point marker */}
+                    {trajectory.length > 0 && (
+                      <circle cx={trajectory[0].x} cy={trajectory[0].y} r="0.08" fill="#10b981" opacity="0.6" />
                     )}
                  </svg>
-                 <div className="absolute bottom-4 left-6 text-[8px] font-mono text-white/20 flex gap-4 uppercase tracking-widest">
+                 
+                 <div className="absolute bottom-4 left-6 right-6 text-[8px] font-mono text-white/30 flex justify-between uppercase tracking-widest">
                    <span>Scale: 1m/Grid</span>
                    <span>Origin: 0,0</span>
+                   <span>{telemetry.x?.toFixed(2)}, {telemetry.y?.toFixed(2)}</span>
                  </div>
                </div>
             </div>
@@ -360,17 +469,40 @@ export default function DashboardPage() {
             </div>
           </div>
 
-          <div className="hwi-glass rounded-[40px] p-10 border-white/5">
+          <div className="hwi-glass rounded-[40px] p-10 border-white/5 hover:border-white/10 transition-all duration-300">
             <h3 className="text-[9px] font-mono font-bold uppercase tracking-[0.4em] text-slate-500 mb-8 flex items-center gap-4">
-              <span className="w-1 h-1 rounded-full bg-rose-500 animate-pulse" /> Finalized Neural Telemetry
+              <span className="w-2 h-2 rounded-full bg-rose-500 animate-pulse shadow-[0_0_10px_rgba(244,63,94,0.6)]" /> 
+              Neural Telemetry Stream
+              {recentLogs.length > 0 && (
+                <span className="ml-auto text-[8px] normal-case tracking-normal text-indigo-400">
+                  {recentLogs.length} events
+                </span>
+              )}
             </h3>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-20 gap-y-4 max-h-[160px] overflow-y-auto custom-scrollbar pr-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-x-20 gap-y-3 max-h-[180px] overflow-y-auto custom-scrollbar pr-4">
                {recentLogs.map((log, i) => (
-                 <div key={i} className="flex gap-4 text-[10px] font-mono border-l border-white/5 pl-4 py-1.5 transition-all hover:bg-white/[0.02]">
-                   <span className="text-white/10 shrink-0 select-none">[{log.time}]</span>
-                   <span className={log.tag === 'col' ? 'text-rose-500 font-bold' : log.tag === 'sys' ? 'text-indigo-400' : 'text-slate-400'}>{log.text}</span>
+                 <div key={i} className={`flex gap-4 text-[10px] font-mono border-l-2 pl-4 py-2 transition-all hover:bg-white/[0.03] rounded-r-lg ${
+                   log.tag === 'col' ? 'border-rose-500 bg-rose-500/5' : 
+                   log.tag === 'sys' ? 'border-indigo-500 bg-indigo-500/5' : 
+                   log.tag === 'drl' ? 'border-emerald-500 bg-emerald-500/5' :
+                   'border-white/10'
+                 }`}>
+                   <span className="text-white/15 shrink-0 select-none font-bold">[{log.time}]</span>
+                   <span className={`${
+                     log.tag === 'col' ? 'text-rose-400 font-bold' : 
+                     log.tag === 'sys' ? 'text-indigo-400' : 
+                     log.tag === 'drl' ? 'text-emerald-400' :
+                     'text-slate-400'
+                   }`}>
+                     {log.text}
+                   </span>
                  </div>
                ))}
+               {recentLogs.length === 0 && (
+                 <div className="col-span-2 text-center py-12 text-slate-600 text-xs font-mono">
+                   Waiting for telemetry data...
+                 </div>
+               )}
             </div>
           </div>
         </section>
