@@ -1,68 +1,26 @@
 import { useState, useEffect, useRef } from 'react';
-import { generateMockTelemetry, generateEpisodeData } from '../utils';
+import axios from 'axios';
+import { BACKEND_URL } from '../utils';
 
 export const useAlgoWebSocket = (algo = 'ppo') => {
-  // Pre-seed metrics and history to ensure graphs are ALIVE immediately
-  const initialHistory = generateEpisodeData(40).map(d => ({
-    time: d.episode,
-    reward: d.reward,
-    avg: d.avg_reward,
-    success_rate: d.success_rate,
-    collision_rate: d.collision_rate,
-    v_value: 0, q_value: 0, a_linear: 0, a_angular: 0
-  }));
-
   const [metrics, setMetrics] = useState({ 
-    reward: 52.54, avg_reward: 48.2, steps: 100, collision_rate: 0.02, x: 0, y: 0, timestamp: Date.now()/1000, scan: Array(24).fill(2.5)
+    reward: 0, avg_reward: 0, steps: 0, collision_rate: 0, x: 0, y: 0, timestamp: 0, scan: Array(24).fill(0)
   });
-  const [chartHistory, setChartHistory] = useState(initialHistory);
+  const [chartHistory, setChartHistory] = useState([]);
   const [isConnected, setIsConnected] = useState(false);
-  const [isDemoMode, setIsDemoMode] = useState(false);
+  const [isSystemActive, setIsSystemActive] = useState(false);
   const wsRef = useRef(null);
-  const stepRef = useRef(100);
 
   useEffect(() => {
-    let mockInterval = null;
-
-    const pushToHistory = (data) => {
-      setChartHistory(prev => {
-        const newHistory = [...prev, { 
-          time: data.steps, 
-          reward: data.reward, 
-          avg: data.avg_reward,
-          success_rate: data.success_rate || 0,
-          collision_rate: data.collision_rate || 0,
-          v_value: data.v_value || 0,
-          q_value: data.q_value || 0,
-          a_linear: data.action_linear || 0,
-          a_angular: data.action_angular || 0
-        }];
-        return newHistory.slice(-50); 
-      });
-    };
-
-    const startMockMode = () => {
-      setIsDemoMode(true);
-      mockInterval = setInterval(() => {
-        stepRef.current += 1;
-        const mockMsg = generateMockTelemetry(stepRef.current, algo);
-        setMetrics(mockMsg.data);
-        pushToHistory(mockMsg.data);
-      }, 1000); // 1Hz for demo stability
-    };
-
-    const stopMockMode = () => {
-      setIsDemoMode(false);
-      if (mockInterval) clearInterval(mockInterval);
-    };
+    let statusInterval = null;
 
     const connect = () => {
-      const wsUrl = `ws://localhost:8000/ws/${algo}`;
+      // Connect to the unified /ws endpoint
+      const wsUrl = `ws://localhost:8000/ws`;
       const ws = new WebSocket(wsUrl);
 
       ws.onopen = () => {
         setIsConnected(true);
-        stopMockMode();
       };
 
       ws.onmessage = (event) => {
@@ -71,7 +29,20 @@ export const useAlgoWebSocket = (algo = 'ppo') => {
           if (msg.type === 'telemetry') {
             const data = msg.data;
             setMetrics(data);
-            pushToHistory(data);
+            setChartHistory(prev => {
+              const newHistory = [...prev, { 
+                time: data.steps, 
+                reward: data.reward, 
+                avg: data.avg_reward,
+                success_rate: data.success_rate || 0,
+                collision_rate: data.collision_rate || 0,
+                v_value: data.v_value || 0,
+                q_value: data.q_value || 0,
+                a_linear: data.action_linear || 0,
+                a_angular: data.action_angular || 0
+              }];
+              return newHistory.slice(-50); 
+            });
           }
         } catch (err) {
           console.error("WS Message Error:", err);
@@ -80,21 +51,42 @@ export const useAlgoWebSocket = (algo = 'ppo') => {
 
       ws.onclose = () => {
         setIsConnected(false);
-        // If ignition was attempted or just starting up, use demo mode if real connection fails
-        startMockMode();
-        setTimeout(connect, 3000); 
+        // Only reconnect if the system is still active
+        if (isSystemActive) {
+            setTimeout(connect, 3000);
+        }
       };
 
       wsRef.current = ws;
     };
 
-    connect();
+    const checkStatus = async () => {
+       try {
+           const res = await axios.get(`${BACKEND_URL}/status`);
+           setIsSystemActive(res.data.running);
+           
+           if (!res.data.running) {
+               // If system stopped, clear everything
+               setChartHistory([]);
+               setMetrics({ reward: 0, steps: 0, scan: Array(24).fill(0) });
+               if (wsRef.current) wsRef.current.close();
+           } else if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) {
+               // If running but not connected, connect
+               connect();
+           }
+       } catch (err) {
+           setIsSystemActive(false);
+       }
+    };
+
+    statusInterval = setInterval(checkStatus, 2000);
+    checkStatus();
 
     return () => {
       if (wsRef.current) wsRef.current.close();
-      stopMockMode();
+      if (statusInterval) clearInterval(statusInterval);
     };
-  }, [algo]);
+  }, []); // Remove algo dependency as we poll backend for current active session
 
-  return { metrics, chartHistory, isConnected, isDemoMode };
+  return { metrics, chartHistory, isConnected, isSystemActive };
 };
