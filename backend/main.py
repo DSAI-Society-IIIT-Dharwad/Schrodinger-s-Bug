@@ -1,15 +1,21 @@
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
-from fastapi.middleware.cors import CORSMiddleware
 import asyncio
 import json
-import os
+import logging
 import subprocess
-import threading
-from typing import List
+from typing import Dict, List, Optional
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from pydantic import BaseModel
 
-app = FastAPI()
+# --- Configuration ---
+WSL_DISTRO = "Ubuntu-22.04"
+WSL_BASE = ["wsl", "-d", WSL_DISTRO, "bash", "-c"]
 
-# Enable CORS for frontend access
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger("schrödingers-bug")
+
+app = FastAPI(title="Schrödinger's Bug - Robotics Control Node")
+
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -18,124 +24,155 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-# Global process tracker and log queue
-active_processes = {}
-connected_clients: List[WebSocket] = []
+# --- Process State ---
+class SystemState:
+    def __init__(self):
+        self.active_processes: Dict[str, asyncio.subprocess.Process] = {}
+        self.mode = "manual" # manual, training, inference
+        self.scenario = "logistics" # healthcare, defence, logistics
+        self.logs: List[str] = []
+        self.telemetry = {
+            "reward": 0.0,
+            "collision": False,
+            "distance": 0.0,
+            "success": False,
+            "v": 0.0,
+            "w": 0.0
+        }
 
-async def broadcast_ws(message: dict):
-    """Auxiliary function to broadcast messages to all connected clients."""
-    disconnected = []
-    for client in connected_clients:
+state = SystemState()
+
+# --- WebSocket Hub ---
+class ConnectionManager:
+    def __init__(self):
+        self.active_connections: List[WebSocket] = []
+
+    async def connect(self, websocket: WebSocket):
+        await websocket.accept()
+        self.active_connections.append(websocket)
+
+    def disconnect(self, websocket: WebSocket):
+        self.active_connections.remove(websocket)
+
+    async def broadcast(self, message: dict):
+        # Create a copy of the list to avoid modifying it while iterating
+        for connection in list(self.active_connections):
+            try:
+                await connection.send_json(message)
+            except Exception:
+                if connection in self.active_connections:
+                    self.active_connections.remove(connection)
+
+manager = ConnectionManager()
+
+# --- WSL Executor ---
+async def run_wsl_persistent(name: str, cmd: str):
+    full_cmd = " ".join(WSL_BASE + [f'"{cmd}"'])
+    try:
+        proc = await asyncio.create_subprocess_shell(
+            full_cmd,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.STDOUT
+        )
+        state.active_processes[name] = proc
+        # Start a task to read logs and broadcast
+        asyncio.create_task(log_reader(name, proc))
+        return True
+    except Exception as e:
+        logger.error(f"Failed to run WSL cmd '{name}': {e}")
+        return False
+
+async def log_reader(name: str, proc: asyncio.subprocess.Process):
+    while True:
         try:
-            await client.send_json(message)
+            line = await proc.stdout.readline()
+            if not line:
+                break
+            clean_line = line.decode('utf-8', errors='replace').strip()
+            if clean_line:
+                log_msg = f"[{name}] {clean_line}"
+                state.logs.append(log_msg)
+                
+                # Check if line is telemetry JSON
+                if clean_line.startswith("{") and clean_line.endswith("}"):
+                    try:
+                        tel_data = json.loads(clean_line)
+                        state.telemetry.update(tel_data)
+                        await manager.broadcast({"type": "telemetry", "data": state.telemetry})
+                    except:
+                        pass
+                else:
+                    await manager.broadcast({"type": "log", "data": log_msg})
+                    
+                if len(state.logs) > 500: state.logs.pop(0)
+        except Exception as e:
+            logger.error(f"Error reading log: {e}")
+            break
+            
+    await proc.wait()
+    if name in state.active_processes:
+        del state.active_processes[name]
+    await manager.broadcast({"type": "status", "data": {"process": name, "status": "exited"}})
+
+# --- API Endpoints ---
+@app.post("/start-system")
+async def start_system():
+    # Kill any existing processes
+    subprocess.run(WSL_BASE + ["bash ~/stop_system.sh"], capture_output=True)
+    state.active_processes.clear()
+    
+    success = await run_wsl_persistent("ENGINE", "bash ~/start_system.sh")
+    if success:
+        return {"status": "success", "message": "Schrödinger's Bug System Initialized"}
+    raise HTTPException(status_code=500, detail="WSL Launch Failed")
+
+@app.post("/stop-system")
+async def stop_system():
+    subprocess.run(WSL_BASE + ["bash ~/stop_system.sh"], capture_output=True)
+    
+    # Terminate tracked processes
+    for name, proc in list(state.active_processes.items()):
+        try:
+            proc.terminate()
         except:
-            disconnected.append(client)
-    for client in disconnected:
-        if client in connected_clients:
-            connected_clients.remove(client)
+            pass
+    state.active_processes.clear()
+    return {"status": "success", "message": "System Halted Safe"}
 
-def log_reader(pipe, prefix):
-    """Thread function to read process output and queue it for broadcasting."""
-    loop = asyncio.new_event_loop()
-    asyncio.set_event_loop(loop)
-    for line in iter(pipe.readline, b''):
-        msg = line.decode().strip()
-        if msg:
-            formatted_msg = f"[{prefix}] {msg}"
-            print(formatted_msg)
-            # We use a separate loop or a thread-safe way to broadcast
-            # For simplicity, we'll just print and rely on the WS loop for now, 
-            # but a real implementation would use a queue.
-            # Here we'll just inject it into a global logs list that the WS loop polls.
-            global_logs.append(formatted_msg)
-    pipe.close()
+class ModeRequest(BaseModel):
+    mode: str
 
-global_logs = []
+@app.post("/set-mode")
+async def set_mode(req: ModeRequest):
+    if req.mode not in ["manual", "training", "inference"]:
+        raise HTTPException(status_code=400, detail="Invalid Mode")
+    state.mode = req.mode
+    logger.info(f"Mode switched to: {state.mode}")
+    return {"status": "success", "mode": state.mode}
 
-# Helper function to execute WSL commands and capture logs
-def run_wsl_cmd_with_logging(cmd: str, name: str):
-    full_cmd = (
-        f"export TURTLEBOT3_MODEL=burger; "
-        f"export DISPLAY=$(grep nameserver /etc/resolv.conf | awk '{{print $2}}'):0; "
-        f"export LIBGL_ALWAYS_INDIRECT=0; "
-        f"export GALLIUM_DRIVER=llvmpipe; "
-        f"export MESA_GL_VERSION_OVERRIDE=3.3; "
-        f"source /opt/ros/humble/setup.bash; "
-        f"{cmd}"
-    )
-    process = subprocess.Popen(
-        ["wsl", "bash", "-c", full_cmd],
-        stdout=subprocess.PIPE,
-        stderr=subprocess.STDOUT,
-        preexec_fn=None
-    )
-    active_processes[name] = process
-    # Start thread to read logs
-    threading.Thread(target=log_reader, args=(process.stdout, name.upper()), daemon=True).start()
-    return process
+class ScenarioRequest(BaseModel):
+    scenario: str
 
-@app.get("/")
-def read_root():
-    return {"status": "BACKEND_ALIVE", "message": "Neural Pathfinder API v2"}
-
-@app.post("/launch-ros")
-async def launch_ros():
-    run_wsl_cmd_with_logging("ros2 daemon stop; ros2 daemon start", "ros-core")
-    return {"status": "success"}
-
-@app.post("/launch-sim")
-async def launch_sim():
-    # Clean up lingering entities
-    subprocess.run(["wsl", "bash", "-c", "pkill -f gzserver; pkill -f gzclient; pkill -f rclpy"])
-    run_wsl_cmd_with_logging("ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py", "gazebo")
-    return {"status": "success"}
-
-@app.post("/start-training")
-async def start_training():
-    run_wsl_cmd_with_logging("cd /mnt/c/2026proj/DRL\ ROBOT && python3 train.py", "drl-node")
-    return {"status": "success"}
-
-@app.post("/stop-all")
-async def stop_all():
-    subprocess.run(["wsl", "bash", "-c", "pkill -f gzserver; pkill -f gzclient; pkill -f rclpy; pkill -f python3; ros2 daemon stop"])
-    active_processes.clear()
-    return {"status": "success"}
+@app.post("/set-scenario")
+async def set_scenario(req: ScenarioRequest):
+    if req.scenario not in ["healthcare", "defence", "logistics"]:
+        raise HTTPException(status_code=400, detail="Invalid Scenario")
+    state.scenario = req.scenario
+    logger.info(f"Scenario switched to: {state.scenario}")
+    return {"status": "success", "scenario": state.scenario}
 
 @app.websocket("/ws")
-@app.websocket("/ws/telemetry") # Unified alias
 async def websocket_endpoint(websocket: WebSocket):
-    await websocket.accept()
-    connected_clients.append(websocket)
-    print(f"WS_CONNECT: {websocket.client}")
-    
+    await manager.connect(websocket)
     try:
+        # Send initial state
+        await websocket.send_json({"type": "init", "logs": state.logs, "telemetry": state.telemetry, "mode": state.mode})
         while True:
-            # 1. Broadcase Telemetry
-            metrics_file = "../metrics.json" if os.path.exists("../metrics.json") else "metrics.json"
-            if os.path.exists(metrics_file):
-                try:
-                    with open(metrics_file, "r") as f:
-                        data = json.load(f)
-                        await websocket.send_json({"type": "telemetry", "data": data})
-                except: pass
-            
-            # 2. Broadcast Logs
-            global global_logs
-            if global_logs:
-                for log in global_logs:
-                    await websocket.send_json({"type": "log", "data": log})
-                global_logs = [] # Clear logs after broadcasting
-                
-            await asyncio.sleep(0.5) # Higher frequency for responsiveness
-            
+            data = await websocket.receive_text()
+            # Handle incoming signals if needed
+            pass
     except WebSocketDisconnect:
-        if websocket in connected_clients:
-            connected_clients.remove(websocket)
-        print("WS_DISCONNECT")
-    except Exception as e:
-        print(f"WS_ERROR: {str(e)}")
-        if websocket in connected_clients:
-            connected_clients.remove(websocket)
+        manager.disconnect(websocket)
 
 if __name__ == "__main__":
     import uvicorn

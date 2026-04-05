@@ -18,50 +18,33 @@ class TelemetryNode(Node):
             "w": 0.0,
             "x": 0.0,
             "y": 0.0,
-            "min_dist": 3.5,
-            "lidar": [] # Array for RadarView
+            "min_dist": 3.5
         }
         
-        # Broadcast frequency: 10Hz for smooth HUD
-        self.timer = self.create_timer(0.1, self.publish_telemetry)
+        self.timer = self.create_timer(0.2, self.publish_telemetry)
 
     def scan_cb(self, msg):
-        # Process raw laser ranges
         ranges = np.array(msg.ranges)
         ranges[np.isinf(ranges)] = 3.5
-        ranges[np.isnan(ranges)] = 3.5
         self.data["min_dist"] = float(np.min(ranges))
-        
-        # Downsample to 24 points for the RadarView to keep performance high
-        # The frontend components like RadarView usually look for a small array
-        points = 36
-        n = len(ranges)
-        step = max(1, n // points)
-        self.data["lidar"] = [float(np.min(ranges[i:i+step])) for i in range(0, n, step)][:points]
 
     def odom_cb(self, msg):
-        # Capture raw position for trajectory mapping
-        self.data["x"] = float(round(msg.pose.pose.position.x, 3))
-        self.data["y"] = float(round(msg.pose.pose.position.y, 3))
+        self.data["x"] = round(msg.pose.pose.position.x, 2)
+        self.data["y"] = round(msg.pose.pose.position.y, 2)
 
     def cmd_cb(self, msg):
-        # Capture the current commanded velocities
-        self.data["v"] = float(round(msg.linear.x, 2))
-        self.data["w"] = float(round(msg.angular.z, 2))
+        self.data["v"] = round(msg.linear.x, 2)
+        self.data["w"] = round(msg.angular.z, 2)
 
     def publish_telemetry(self):
-        # Print JSON to stdout so ProcessManager can capture and broadcast it
+        # Print JSON to stdout so backend can capture it via subprocess
         print(json.dumps(self.data), flush=True)
 
 def main():
     rclpy.init()
     node = TelemetryNode()
-    try:
-        rclpy.spin(node)
-    except KeyboardInterrupt:
-        pass
-    finally:
-        rclpy.shutdown()
+    rclpy.spin(node)
+    rclpy.shutdown()
 
 if __name__ == '__main__':
     main()

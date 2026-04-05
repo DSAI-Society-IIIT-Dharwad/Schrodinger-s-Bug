@@ -4,183 +4,189 @@ from sensor_msgs.msg import LaserScan
 from nav_msgs.msg import Odometry
 from geometry_msgs.msg import Twist
 import numpy as np
-import os
 import json
-import torch
-import math
-import random
-from agent import PPO, Memory
+import time
+import os
+import sys
+from agent import DRLAgent
 
-class TrainNode(Node):
+class DRLNode(Node):
+    """
+    ROS2 Node for DRL-based robot navigation
+    Handles topics, movement, and training
+    """
+    
     def __init__(self):
-        super().__init__('train_node')
+        super().__init__('drl_node')
         
-        # ROS2 Setup
-        self.create_subscription(LaserScan, '/scan', self.scan_callback, 10)
-        self.create_subscription(Odometry, '/odom', self.odom_callback, 10)
+        # State variables
+        self.scan_data = None
+        self.rewards = []
+        self.total_steps = 0
+        self.success = 0
+        self.episode = 0
+        self.steps = 0
+        
+        # Initialize DRL Agent (separate from ROS)
+        self.agent = DRLAgent(state_dim=36, action_dim=2)
+        
+        # ROS2 subscriptions and publishers
+        self.create_subscription(LaserScan, '/scan', self.scan_cb, 10)
+        self.create_subscription(Odometry, '/odom', self.odom_cb, 10)
         self.cmd_pub = self.create_publisher(Twist, '/cmd_vel', 10)
         
-        # Timer for the training loop (0.1 sec = 10Hz)
-        self.timer = self.create_timer(0.1, self.loop)
+        # Internal state
+        self.odom_data = {'x': 0.0, 'y': 0.0}
+        self.goal = [np.random.uniform(-3, 3), np.random.uniform(-3, 3)]
         
-        # DRL Setup (PPO)
-        self.state_dim = 38 # 36 lidar scans + 2 goal info (dist, angle)
-        self.action_dim = 2 # linear velocity, angular velocity
-        self.agent = PPO(state_dim=self.state_dim, action_dim=self.action_dim)
-        self.memory = Memory()
+        # Ensure log directory exists
+        os.makedirs("/home/sree/ros2_ws/logs", exist_ok=True)
         
-        # Goal Configuration (Vocabai Challenge)
-        self.goal_x = 2.0
-        self.goal_y = 2.0
-        self.prev_distance = 0.0
+        # Control loop at 5Hz (0.2s interval)
+        self.timer = self.create_timer(0.2, self.loop)
         
-        # State/Telemetry
-        self.scan_data = None
-        self.odom_data = None
-        self.robot_x = 0.0
-        self.robot_y = 0.0
-        self.robot_yaw = 0.0
+        self.get_logger().info("DRL Node initialized - Ready for navigation")
+    
+    def scan_cb(self, msg):
+        """LiDAR scan callback - MANDATORY"""
+        self.scan_data = np.array(msg.ranges)
+    
+    def odom_cb(self, msg):
+        """Odometry callback"""
+        self.odom_data['x'] = msg.pose.pose.position.x
+        self.odom_data['y'] = msg.pose.pose.position.y
+    
+    def process_lidar(self, scan):
+        """
+        Process LiDAR data into state vector
+        Returns: state array with shape (36,)
+        """
+        # Downsample to 24 readings
+        indices = np.linspace(0, len(scan)-1, 24, dtype=int)
+        lidar_readings = scan[indices]
         
-        self.total_steps = 0
-        self.rewards_history = []
-        self.collisions = 0
-        self.successes = 0
+        # Replace inf values with max range (3.5m)
+        lidar_readings[np.isinf(lidar_readings)] = 3.5
         
-        self.log_dir = "logs"
-        os.makedirs(self.log_dir, exist_ok=True)
+        # Calculate distance and angle to goal
+        current_x = self.odom_data['x']
+        current_y = self.odom_data['y']
+        dist_to_goal = np.sqrt((self.goal[0] - current_x)**2 + (self.goal[1] - current_y)**2)
+        angle_to_goal = np.arctan2(self.goal[1] - current_y, self.goal[0] - current_x)
         
-        self.get_logger().info("🔥 Vocabai DRL Trainer: Navigation Goal (2.0, 2.0)")
-
-    def scan_callback(self, msg):
-        ranges = np.array(msg.ranges)
-        ranges[np.isinf(ranges)] = 3.5
-        ranges[np.isnan(ranges)] = 3.5
-        self.scan_data = ranges[::10][:36]
-
-    def odom_callback(self, msg):
-        self.odom_data = msg
-        self.robot_x = msg.pose.pose.position.x
-        self.robot_y = msg.pose.pose.position.y
+        # Normalize
+        dist_normalized = min(dist_to_goal / 10.0, 1.0)
+        angle_normalized = angle_to_goal / np.pi
         
-        # Quaternion to Euler (Yaw)
-        q = msg.pose.pose.orientation
-        siny_cosp = 2 * (q.w * q.z + q.x * q.y)
-        cosy_cosp = 1 - 2 * (q.y * q.y + q.z * q.z)
-        self.robot_yaw = math.atan2(siny_cosp, cosy_cosp)
-
+        # Combine into state vector
+        state = np.concatenate([lidar_readings, [dist_normalized, angle_normalized]])
+        
+        return state
+    
+    def compute_reward(self, dist_to_goal, min_obstacle, collision):
+        """
+        Compute reward based on current state
+        """
+        reward = -dist_to_goal * 0.5
+        
+        # Proximity penalty
+        if min_obstacle < 0.5:
+            reward -= 2.0
+        
+        # Collision penalty
+        if collision:
+            reward -= 200.0
+        
+        # Goal reached reward
+        if dist_to_goal < 0.2:
+            reward += 200.0
+        
+        return reward
+    
     def loop(self):
-        if self.scan_data is None or self.odom_data is None:
+        """Main control loop - MOVEMENT + TRAINING"""
+        # Check if we have scan data
+        if self.scan_data is None:
             return
-
-        # 1. Goal Calculations
-        distance = math.sqrt((self.goal_x - self.robot_x)**2 + (self.goal_y - self.robot_y)**2)
-        skew_x = self.goal_x - self.robot_x
-        skew_y = self.goal_y - self.robot_y
-        dot = skew_x * math.cos(self.robot_yaw) + skew_y * math.sin(self.robot_yaw)
-        mag1 = math.sqrt(skew_x**2 + skew_y**2)
-        mag2 = 1.0 # robot orientation vector length
-        beta = math.acos(max(-1.0, min(1.0, dot / (mag1 * mag2))))
         
-        # Cross product to determine sign of angle
-        if (skew_x * math.sin(self.robot_yaw) - skew_y * math.cos(self.robot_yaw)) > 0:
-            beta = -beta
-
-        # 2. State construction (36 scan + 2 navigation)
-        state = np.append(self.scan_data, [distance, beta])
+        # Process LiDAR into state
+        state = self.process_lidar(self.scan_data)
         
-        # 3. Select action
-        action, action_logprob = self.agent.select_action(state)
+        # Get action from DRL agent
+        linear, angular = self.agent.predict(state)
         
-        # 4. Apply action
-        twist = Twist()
-        # Requirement: twist.linear.x = 0.15 + action[0] (clipped)
-        linear_v = 0.15 + (float(action[0]) * 0.1) 
-        angular_v = float(action[1]) + (random.uniform(-0.05, 0.05))
+        # FORCE EXPLORATION (critical)
+        linear += 0.15
+        angular += np.random.uniform(-0.3, 0.3)
         
-        twist.linear.x = float(np.clip(linear_v, 0.05, 0.22))
-        twist.angular.z = float(np.clip(angular_v, -1.8, 1.8))
-        self.cmd_pub.publish(twist)
+        # Safety override
+        min_dist = np.min(self.scan_data)
+        if min_dist < 0.22:
+            linear = 0.0
+            angular = 0.0
+        elif min_dist < 0.45:
+            linear = 0.05
+            angular = 0.3
         
-        # 5. Reward Function (Vocabai Optimization)
-        reward = 0.0
-        done = False
+        # Publish velocity command
+        cmd = Twist()
+        cmd.linear.x = float(np.clip(linear, 0.0, 0.22))
+        cmd.angular.z = float(np.clip(angular, -1.5, 1.5))
+        self.cmd_pub.publish(cmd)
         
-        # Collision Penalty
-        min_scan = np.min(self.scan_data)
-        if min_scan < 0.2:
-            reward = -500.0
-            done = True
-            self.collisions += 1
-            self.get_logger().warn("💥 COLLISION DETECTED")
+        # Compute reward
+        current_x = self.odom_data['x']
+        current_y = self.odom_data['y']
+        dist_to_goal = np.sqrt((self.goal[0] - current_x)**2 + (self.goal[1] - current_y)**2)
+        collision = np.min(self.scan_data) < 0.15
         
-        # Goal Success Reward
-        elif distance < 0.3:
-            reward = 1000.0
-            done = True
-            self.successes += 1
-            self.get_logger().info("🎯 GOAL REACHED!")
+        reward = self.compute_reward(dist_to_goal, min_dist, collision)
+        self.rewards.append(reward)
         
-        # Navigation Progress Reward
-        else:
-            # Positive reward for moving closer (Vocabai requirement)
-            reward = (self.prev_distance - distance) * 200.0
-            # Small time penalty
-            reward -= 0.1
-            # Heading reward (facing the goal)
-            reward += math.cos(beta) * 0.2
-
-        self.prev_distance = distance
-        
-        # 6. Memory & Update
-        self.memory.states.append(state)
-        self.memory.actions.append(action)
-        self.memory.logprobs.append(action_logprob)
-        self.memory.rewards.append(reward)
-        self.memory.is_terminals.append(done)
-        self.rewards_history.append(reward)
+        # Training metrics
         self.total_steps += 1
+        progress = min(100, self.total_steps * 0.1)
+        accuracy = self.success / max(1, self.total_steps)
         
-        if self.total_steps % 128 == 0:
-            self.agent.update(self.memory)
-            self.memory.clear()
+        # Print telemetry in required format
+        print(f"[TEL] reward={reward:.2f} progress={progress:.1f} accuracy={accuracy:.2f}")
+        sys.stdout.flush()
+        
+        # Save data periodically
+        if len(self.rewards) % 10 == 0:
+            try:
+                np.save("/home/sree/ros2_ws/logs/rewards.npy", self.rewards)
+            except Exception as e:
+                self.get_logger().warn(f"Failed to save rewards: {e}")
+        
+        # Check episode termination
+        if collision or dist_to_goal < 0.2 or self.steps > 500:
+            if dist_to_goal < 0.2:
+                self.success += 1
             
-        # 7. Telemetry & Data Logs
-        if self.total_steps % 25 == 0:
-            self.save_telemetry(reward, distance)
+            self.episode += 1
+            self.steps = 0
+            self.goal = [np.random.uniform(-3, 3), np.random.uniform(-3, 3)]
+        
+        self.steps += 1
 
-    def save_telemetry(self, latest_reward, distance):
-        last_100_rewards = self.rewards_history[-100:]
-        avg_reward = np.mean(last_100_rewards) if last_100_rewards else 0
-        collision_rate = self.collisions / max(1, self.total_steps)
-        
-        metrics = {
-            "reward": round(float(latest_reward), 4),
-            "avg_reward": round(float(avg_reward), 4),
-            "reward_history": [round(float(r), 4) for r in last_100_rewards],
-            "steps": int(self.total_steps),
-            "distance_to_goal": round(float(distance), 4),
-            "collision_rate": round(float(collision_rate), 4),
-            "success_rate": round(float(self.successes / max(1, self.total_steps)), 4),
-            "algorithm": "PPO",
-            "phase": "Avoiding" if np.min(self.scan_data) < 0.5 else "Navigating"
-        }
-        
-        with open("metrics.json", "w") as f:
-            json.dump(metrics, f)
-        
-        np.save("rewards.npy", np.array(self.rewards_history))
-        self.get_logger().info(f"📊 Dist: {distance:.2f} | AvgR: {avg_reward:.2f}")
 
 def main():
     rclpy.init()
-    node = TrainNode()
+    node = DRLNode()
     try:
         rclpy.spin(node)
     except KeyboardInterrupt:
         pass
     finally:
-        node.cmd_pub.publish(Twist())
+        # Save final rewards
+        try:
+            np.save("/home/sree/ros2_ws/logs/rewards.npy", node.rewards)
+        except:
+            pass
+        node.destroy_node()
         rclpy.shutdown()
+
 
 if __name__ == '__main__':
     main()

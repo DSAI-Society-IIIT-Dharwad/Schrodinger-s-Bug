@@ -1,7 +1,6 @@
 import asyncio
 import json
 import logging
-import os
 from collections import deque
 from fastapi import WebSocket
 
@@ -18,22 +17,17 @@ class ProcessManager:
         }
         self.logs = deque(maxlen=2000)
         self.clients = set()
-        self.algo = "td3" # Default training algorithm
-        self.scenario = "logistics" # healthcare, defense, logistics
         self.telemetry = {
             "reward": 0.0,
             "collision": False,
             "x": 0.0,
             "y": 0.0,
-            "v": 0.0,
-            "w": 0.0,
+            "velocity": 0.0,
             "episode": 0,
-            "latency": 0,
-            "lidar": [] # LiDAR cloud for RadarView
+            "latency": 0
         }
-        self.history = []
-        self.trajectories = []
-        # targeting the specific distro found in wsl --list
+        self.history = [] # For Analytics graphs
+        self.trajectories = [] # For Demo page (x, y) points
         self.wsl_distro = "Ubuntu-22.04"
 
     def add_client(self, client: WebSocket):
@@ -46,12 +40,17 @@ class ProcessManager:
     async def broadcast(self, message: dict):
         if not self.clients:
             return
+        
+        # Pruning disconnected clients
         disconnected = set()
         for client in self.clients:
-            try: await client.send_json(message)
-            except: disconnected.add(client)
+            try:
+                await client.send_json(message)
+            except Exception:
+                disconnected.add(client)
+        
         for client in disconnected:
-            if client in self.clients: self.clients.remove(client)
+            self.clients.remove(client)
 
     def get_status(self):
         return {
@@ -59,160 +58,174 @@ class ProcessManager:
             "sim": "running" if self.processes["sim"] and self.processes["sim"].returncode is None else "stopped",
             "train": "running" if self.processes["train"] and self.processes["train"].returncode is None else "stopped",
             "simulation_running": self.processes["sim"] and self.processes["sim"].returncode is None,
-            "training_running": self.processes["train"] and self.processes["train"].returncode is None,
-            "algo": self.algo,
-            "scenario": self.scenario
+            "training_running": self.processes["train"] and self.processes["train"].returncode is None
         }
 
-    def set_algorithm(self, algo):
-        self.algo = algo.lower()
-        logger.info(f"DRL Algorithm switched to: {self.algo}")
-
-    def set_scenario(self, scenario):
-        self.scenario = scenario.lower()
-        logger.info(f"Operational Scenario set to: {self.scenario}")
-
-    async def send_teleop(self, linear, angular):
-        source_cmd = "for d in /opt/ros/*; do [ -f $d/setup.bash ] && . $d/setup.bash && break; done"
-        pub_cmd = f"ros2 topic pub --once /cmd_vel geometry_msgs/msg/Twist '{{linear: {{x: {linear}}}, angular: {{z: {angular}}}}}'"
-        # Ensure model is exported for teleop too
-        cmd = f'wsl -d {self.wsl_distro} bash -c "export TURTLEBOT3_MODEL=burger && {source_cmd} && {pub_cmd}"'
-        try:
-            await asyncio.create_subprocess_shell(cmd, stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.DEVNULL)
-            return True
-        except: return False
+    def get_history(self):
+        return self.history
 
     async def _capture_logs(self, process, prefix):
+        import time
         while True:
             line = await process.stdout.readline()
-            if not line: break
+            if not line:
+                break
             msg = line.decode().strip()
             if msg:
                 if msg.startswith("[TEL]"):
                     try:
-                        parts = msg[len("[TEL]"):].strip().split()
-                        data = {}
-                        for p in parts:
-                            if '=' in p:
-                                k, v = p.split('=')
-                                try: data[k] = float(v)
-                                except: data[k] = v
+                        json_str = msg[len("[TEL]"):].strip()
+                        data = json.loads(json_str)
                         self.telemetry.update(data)
+                        
+                        # Add to history if new episode
+                        if "episode" in data:
+                            if len(self.history) == 0 or self.history[-1]["episode"] != data["episode"]:
+                                self.history.append({
+                                    "episode": data["episode"],
+                                    "reward": data.get("reward", 0),
+                                    "success_rate": data.get("success_rate", 0),
+                                    "collision": data.get("collision", False),
+                                    "timestamp": time.time()
+                                })
                         await self.broadcast({"type": "telemetry", "data": self.telemetry})
-                    except: pass
+                    except Exception as e:
+                        pass
                 else:
                     formatted_log = f"[{prefix}] {msg}"
                     self.logs.append(formatted_log)
                     await self.broadcast({"type": "log", "data": formatted_log})
-        await process.wait()
+        
+        exit_code = await process.wait()
+        log_msg = f"[{prefix}] Process exited with code {exit_code}"
+        self.logs.append(log_msg)
+        await self.broadcast({"type": "log", "data": log_msg})
         await self.broadcast({"type": "status", "data": self.get_status()})
 
     async def _capture_telemetry(self, process):
+        import time
         while True:
             line = await process.stdout.readline()
-            if not line: break
+            if not line:
+                break
             try:
                 data = json.loads(line.decode().strip())
+                # Expected format: {reward, collision, x, y, velocity, episode}
+                start_time = time.time()
                 self.telemetry.update(data)
-                self.trajectories.append({"x": data.get("x",0), "y": data.get("y",0)})
-                if len(self.trajectories) > 2000: self.trajectories.pop(0)
+                self.telemetry["latency"] = int((time.time() - start_time) * 1000)
+                
+                # Update history every episode or at regular intervals
+                if len(self.history) == 0 or self.history[-1]["episode"] != self.telemetry["episode"]:
+                    self.history.append({
+                        "episode": self.telemetry["episode"],
+                        "reward": self.telemetry["reward"],
+                        "collision": self.telemetry["collision"],
+                        "success_rate": self.telemetry.get("success_rate", 0),
+                        "timestamp": time.time()
+                    })
+
+                
+                # Update trajectories (x, y) for Demo page
+                self.trajectories.append({
+                    "x": self.telemetry["x"],
+                    "y": self.telemetry["y"],
+                    "reward": self.telemetry["reward"],
+                    "episode": self.telemetry["episode"]
+                })
+                if len(self.trajectories) > 5000: # Practical limit
+                    self.trajectories.pop(0)
+
                 await self.broadcast({"type": "telemetry", "data": self.telemetry})
-            except: pass
+            except Exception as e:
+                # logger.error(f"Telemetry parse error: {e}")
+                pass
 
     async def start_ros(self):
+        """Start ROS2 daemon (NOT roscore - that's ROS1)"""
         if self.processes["ros"] and self.processes["ros"].returncode is None:
-            return False, "Already Active"
-        source_cmd = "for d in /opt/ros/*; do [ -f $d/setup.bash ] && . $d/setup.bash && break; done"
-        cmd = f'wsl -d {self.wsl_distro} bash -c "{source_cmd} && ros2 daemon start"'
+            return False, "ROS2 is already running"
+        
+        # ROS2 doesn't need roscore - just ensure the environment is sourced
         try:
+            cmd = f'wsl -d {self.wsl_distro} bash -c "source /opt/ros/humble/setup.bash && ros2 daemon start"'
             self.processes["ros"] = await asyncio.create_subprocess_shell(
                 cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
             )
             asyncio.create_task(self._capture_logs(self.processes["ros"], "ROS2"))
-            return True, "ROS2 Daemon Online"
-        except Exception as e: return False, str(e)
+            return True, "ROS2 Daemon initialized"
+        except Exception as e:
+            return False, str(e)
 
     async def start_simulation(self):
         if self.processes["sim"] and self.processes["sim"].returncode is None:
-            return False, "Active"
+            return False, "Simulation is already running"
         
-        worlds = {
-            "logistics": "turtlebot3_world.launch.py",
-            "healthcare": "turtlebot3_house.launch.py",
-            "defense": "turtlebot3_stage_4.launch.py"
-        }
-        launch_file = worlds.get(self.scenario, "turtlebot3_world.launch.py")
-        
-        # ── MEGA-ROBUST IGNITION STRATEGY ──
-        source_cmd = "for d in /opt/ros/*; do [ -f $d/setup.bash ] && . $d/setup.bash && break; done"
-        # Try WSLg first, fall back to Resolver IP for Win10, then localhost
-        display_cmd = "if [ -z \"$DISPLAY\" ]; then export DISPLAY=:0; if ! xset q &>/dev/null; then export DISPLAY=$(grep nameserver /etc/resolv.conf | awk '{print $2}'):0.0; fi; fi"
-        # Compatibility flags for Windows/GWSL/Xming
-        render_cmd = "export QT_X11_NO_MITSHM=1 && export LIBGL_ALWAYS_INDIRECT=0 && export TURTLEBOT3_MODEL=burger"
-        # Clean up hung processes
-        kill_cmd = "killall -9 gzserver gzclient python3 ros2 2>/dev/null || true"
-        launch_cmd = f"ros2 launch turtlebot3_gazebo {launch_file} --verbose"
-        
-        full_wsl_cmd = f"{kill_cmd} && {source_cmd} && {display_cmd} && {render_cmd} && {launch_cmd}"
-        cmd = f'wsl -d {self.wsl_distro} bash -c "{full_wsl_cmd}"'
-        
+        # ROS2 launch command (NOT ros1)
+        cmd = f'wsl -d {self.wsl_distro} bash -c "source /opt/ros/humble/setup.bash && export TURTLEBOT3_MODEL=burger && ros2 launch turtlebot3_gazebo turtlebot3_world.launch.py"'
         try:
             self.processes["sim"] = await asyncio.create_subprocess_shell(
                 cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
             )
             asyncio.create_task(self._capture_logs(self.processes["sim"], "GAZEBO"))
             
-            # Start Telemetry Bridge
+            # Start telemetry bridge node in WSL
             win_path = "c/2026proj/DRL\\ ROBOT/backend/telemetry_node.py"
-            tel_cmd = f'wsl -d {self.wsl_distro} bash -c "{source_cmd} && python3 /mnt/{win_path}"'
+            tel_cmd = f'wsl -d {self.wsl_distro} bash -c "source /opt/ros/humble/setup.bash && python3 /mnt/{win_path}"'
+            
             self.processes["telemetry"] = await asyncio.create_subprocess_shell(
                 tel_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
             )
             asyncio.create_task(self._capture_telemetry(self.processes["telemetry"]))
-            return True, f"Environment [{self.scenario.upper()}] Dispatched"
-        except Exception as e: return False, str(e)
+            
+            return True, "Gazebo Simulation & Telemetry Node Started"
+        except Exception as e:
+            return False, str(e)
 
     async def start_training(self):
         if self.processes["train"] and self.processes["train"].returncode is None:
-            return False, "Active"
-        source_cmd = "for d in /opt/ros/*; do [ -f $d/setup.bash ] && . $d/setup.bash && break; done"
+            return False, "Training is already running"
+        
         win_path = "c/2026proj/DRL\\ ROBOT/backend/train.py"
-        # Ensure current working directory is backend for weight saving
-        cmd = f'wsl -d {self.wsl_distro} bash -c "{source_cmd} && cd /mnt/c/2026proj/DRL\\ ROBOT/backend && export TURTLEBOT3_MODEL=burger && python3 /mnt/{win_path} --algo {self.algo} --mode train"'
+        cmd = f'wsl -d {self.wsl_distro} bash -c "source /opt/ros/humble/setup.bash && cd /mnt/c/2026proj/DRL\\ ROBOT/backend && python3 /mnt/{win_path}"'
         try:
             self.processes["train"] = await asyncio.create_subprocess_shell(
                 cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
             )
-            asyncio.create_task(self._capture_logs(self.processes["train"], "DRL-TRAIN"))
-            return True, f"Training Agent [{self.algo.upper()}] Dispatched"
-        except Exception as e: return False, str(e)
+            asyncio.create_task(self._capture_logs(self.processes["train"], "DRL"))
+            
+            # Start plot graph daemon on host Python
+            plot_cmd = 'python -u "c:/2026proj/DRL ROBOT/backend/plot_graph.py"'
+            self.processes["plot"] = await asyncio.create_subprocess_shell(
+                plot_cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
+            )
+            asyncio.create_task(self._capture_logs(self.processes["plot"], "GRAPH"))
+            
+            return True, "TD3 Training Agent & Graphing Initiated"
+        except Exception as e:
+            return False, str(e)
 
-    async def start_testing(self):
-        if self.processes["train"] and self.processes["train"].returncode is None:
-            return False, "Active"
-        source_cmd = "for d in /opt/ros/*; do [ -f $d/setup.bash ] && . $d/setup.bash && break; done"
-        win_path = "c/2026proj/DRL\\ ROBOT/backend/train.py"
-        cmd = f'wsl -d {self.wsl_distro} bash -c "{source_cmd} && cd /mnt/c/2026proj/DRL\\ ROBOT/backend && export TURTLEBOT3_MODEL=burger && python3 /mnt/{win_path} --algo {self.algo} --mode test"'
-        try:
-            self.processes["train"] = await asyncio.create_subprocess_shell(
-                cmd, stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.STDOUT
-            )
-            asyncio.create_task(self._capture_logs(self.processes["train"], "DRL-TEST"))
-            return True, f"Inference Module [{self.algo.upper()}] Loaded"
-        except Exception as e: return False, str(e)
 
     async def stop_all(self):
-        # Kill command via wsl to ensure all background processes die
+        # Kill everything in WSL (ROS2 processes only - NO ROS1)
         import subprocess
-        subprocess.run(f'wsl -d {self.wsl_distro} bash -c "killall -9 gzserver gzclient python3 ros2 2>/dev/null || true"', shell=True)
+        subprocess.run(f'wsl -d {self.wsl_distro} bash -c "killall -9 gzserver gzclient python3 ros2"', shell=True)
+        
         for key in self.processes:
             if self.processes[key]:
-                try: self.processes[key].terminate()
-                except: pass
+                try:
+                    self.processes[key].terminate()
+                except:
+                    pass
                 self.processes[key] = None
+        
         await self.broadcast({"type": "status", "data": self.get_status()})
 
     async def telemetry_loop(self):
+        """Simulation of telemetry if ROS is not producing it (Fallover)"""
+        # This is just in case the /telemetry topic echo fails, we can put mock logic here if needed
+        # But per requirements "DO NOT FAKE DATA", so we omit this unless we want heartbeat.
         while True:
-            await asyncio.sleep(2)
-            await self.broadcast({"type": "heartbeat", "status": self.get_status()})
+            await asyncio.sleep(1)
+            # Maybe broadcast a heartbeat
+            await self.broadcast({"type": "heartbeat", "time": asyncio.get_event_loop().time()})
