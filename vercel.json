@@ -1,0 +1,21 @@
+{
+  "version": 2,
+  "rewrites": [
+    {
+      "source": "/rover/(.*)",
+      "destination": "/Rover-Sim/$1"
+    },
+    {
+       "source": "/drone/(.*)",
+       "destination": "/Drone sim/$1"
+    },
+    {
+      "source": "/api/(.*)",
+      "destination": "/backend/main.py"
+    },
+    {
+      "source": "/(.*)",
+      "destination": "/frontend/$1"
+    }
+  ]
+}
