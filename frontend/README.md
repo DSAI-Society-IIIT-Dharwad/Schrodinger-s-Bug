@@ -1,227 +1,61 @@
-# Schrödinger's Bug - Frontend
+# Neural Pathfinder HWI: Advanced Robotics Control Interface
 
-Frontend application for the DRL (Deep Reinforcement Learning) Robot project, providing a modern React-based dashboard for robot monitoring, control, and analytics.
+The Neural Pathfinder HWI (High-Wired Interface) is the authoritative frontend dashboard for the autonomous robotics navigation system. It provides high-fidelity, real-time visualization of neural decision-making processes, sensor topology, and agent performance analytics.
 
-## Overview
+## System Overview
 
-This frontend serves as the user interface for the robotics system, featuring real-time telemetry visualization, training metrics, simulation replay, and comprehensive analytics dashboards.
+The interface is built upon a modern React architecture, utilizing Framer Motion for tactical animations and Recharts for performance curves. It serves as the primary observation deck for monitoring PPO and TD3 agent activity in the simulated environment.
 
-## Features
+## Key Features
 
-- Real-time robot telemetry via WebSocket
-- Interactive dashboard with live metrics
-- Training progress visualization
-- Simulation replay functionality
-- Analytics and performance charts
-- Neural network architecture visualization
-- System logs monitoring
-- Responsive design with Tailwind CSS
+- **Real-Time Neural HUD**: Live visualization of Policy, Value, and Q-function approximations.
+- **Spatial Topology View**: High-frequency RadarView for LiDAR sensor data visualization.
+- **Multi-Agent Telemetry**: Dedicated WebSocket streams for PPO (Warehouse) and TD3 (Defense) mission modes.
+- **Deep Model Visualizer**: SVG-based diagram showing the 24-input LiDAR state pass through dense hidden layers to policy outputs.
+- **Historical Analysis**: Cross-algorithm comparison engine for evaluating success rates and collision statistics over multiple training sessions.
 
-## Technology Stack
+## Technical Architecture
 
-- React 19
-- Vite - Build tool
-- React Router - Navigation
-- Recharts - Data visualization
-- Framer Motion - Animations
-- Tailwind CSS - Styling
-- Lucide React - Icons
-- Axios - HTTP client
-- WebSocket - Real-time communication
+- **Framework**: React 19
+- **Build Engine**: Vite
+- **Styling**: Tailwind CSS with Glassmorphism configuration
+- **Animation**: Framer Motion
+- **Visualization**: Recharts / SVG
+- **Middleware**: useAlgoWebSocket hook for algorithm-specific telemetry sync
 
-## Prerequisites
+## Installation and Deployment
 
-- Node.js 18+ 
+### 1. Prerequisites
+- Node.js 18.0 or higher
 - npm or yarn
-- Backend server running (FastAPI)
+- Backend system (Neural Pathfinder Backend) active
 
-## Installation
-
-1. Clone the repository:
-```bash
-git clone https://github.com/DSAI-Society-IIIT-Dharwad/Schrodinger-s-Bug.git
-cd Schrodinger-s-Bug/frontend
-```
-
-2. Install dependencies:
+### 2. Setup
+Install the required dependencies:
 ```bash
 npm install
 ```
 
-## Usage
-
-### Development Mode
-
-Start the development server:
+### 3. Execution
+Launch the development interface:
 ```bash
 npm run dev
 ```
 
-The app will be available at `http://localhost:5173`
+The interface will be accessible at `http://localhost:5173`.
 
-### Production Build
+## UI Navigation
 
-Build for production:
-```bash
-npm run build
-```
+- **Dashboard**: Real-time situational awareness and mission control.
+- **Neural HUD**: Deep dive into neural network activations and model confidence.
+- **Analytics**: Long-term convergence curves and efficiency metrics.
+- **Comparison**: Side-by-side performance evaluation of PPO and TD3 agents.
+- **Gallery**: High-fidelity media captures of previous mission success states.
 
-Preview the production build:
-```bash
-npm run preview
-```
+## Team and Documentation
 
-### Linting
-
-Run ESLint:
-```bash
-npm run lint
-```
-
-## Project Structure
-
-```
-frontend/
-├── public/                 # Static assets
-│   ├── baseline.png
-│   ├── favicon.svg
-│   ├── icons.svg
-│   └── optimized.png
-├── src/
-│   ├── components/         # Reusable UI components
-│   │   ├── AnalyticsPanel.jsx
-│   │   ├── ControlPanel.jsx
-│   │   ├── HeroSection.jsx
-│   │   ├── Layout.jsx
-│   │   ├── LogsPanel.jsx
-│   │   ├── RadarView.jsx
-│   │   ├── Sections.jsx
-│   │   └── SimulationReplay.jsx
-│   ├── pages/             # Page components
-│   │   ├── AnalyticsPage.jsx
-│   │   ├── DashboardPage.jsx
-│   │   ├── DemoPage.jsx
-│   │   ├── HomePage.jsx
-│   │   ├── LogsPage.jsx
-│   │   ├── NeuralPage.jsx
-│   │   └── TechPage.jsx
-│   ├── hooks/             # Custom React hooks
-│   │   └── useWebSocket.js
-│   ├── assets/            # Images and static files
-│   ├── App.jsx            # Main app component
-│   ├── main.jsx           # Entry point
-│   ├── index.css          # Global styles
-│   ├── App.css            # App-specific styles
-│   ├── utils.js           # Utility functions
-│   └── simulationEngine.js # Simulation logic
-├── index.html             # HTML template
-├── vite.config.js         # Vite configuration
-├── package.json           # Dependencies
-└── eslint.config.js       # ESLint configuration
-```
-
-## Pages
-
-- **Home**: Landing page with project overview
-- **Dashboard**: Real-time robot monitoring and control
-- **Analytics**: Training metrics and performance charts
-- **Demo**: Interactive simulation and trajectory visualization
-- **Neural**: Neural network architecture visualization
-- **Logs**: System logs and debugging information
-- **Tech**: Technical documentation and architecture
-
-## Components
-
-### Key Components
-
-- **ControlPanel**: Robot control interface
-- **RadarView**: LiDAR visualization
-- **AnalyticsPanel**: Training metrics display
-- **SimulationReplay**: Trajectory playback
-- **LogsPanel**: Real-time log streaming
-
-### WebSocket Integration
-
-The app uses a custom `useWebSocket` hook for real-time data:
-
-```javascript
-import { useWebSocket } from './hooks/useWebSocket';
-
-function Dashboard() {
-  const { data, connected } = useWebSocket('ws://localhost:8000/ws');
-  
-  return (
-    <div>
-      <p>Status: {connected ? 'Connected' : 'Disconnected'}</p>
-      <p>Reward: {data?.reward}</p>
-      <p>Progress: {data?.progress}%</p>
-    </div>
-  );
-}
-```
-
-## Configuration
-
-### Backend Connection
-
-Update the WebSocket URL in your components to match your backend server:
-
-```javascript
-const ws = new WebSocket('ws://localhost:8000/ws');
-```
-
-### Environment Variables
-
-Create a `.env` file for environment-specific configuration:
-
-```
-VITE_API_URL=http://localhost:8000
-VITE_WS_URL=ws://localhost:8000/ws
-```
-
-## Development
-
-### Adding New Pages
-
-1. Create a new page component in `src/pages/`
-2. Add route in `App.jsx`
-3. Update navigation in `Layout.jsx`
-
-### Adding New Components
-
-1. Create component in `src/components/`
-2. Export from component file
-3. Import where needed
-
-### Styling
-
-The project uses Tailwind CSS for styling. Customize in:
-- `tailwind.config.js` (if created)
-- Component-level className attributes
-- `src/index.css` for global styles
-
-## Testing
-
-Run tests (when configured):
-```bash
-npm test
-```
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch
-3. Commit your changes
-4. Push to the branch
-5. Open a Pull Request
+The dashboard was developed by the Neural Pathfinder core team: Sreejith Nair, Pavan Hosatti, Abhay, and Rishita. It integrates research from multiple Docker and GitHub repositories within the collective.
 
 ## License
 
 This project is licensed under the MIT License.
-
-## Acknowledgments
-
-- DSAI Society, IIIT Dharwad
-- React Team
-- Vite Team
-- Tailwind CSS Team

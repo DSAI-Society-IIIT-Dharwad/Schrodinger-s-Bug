@@ -1,163 +1,97 @@
-# Schrödinger's Bug - DRL Robotics System
+# Neural Pathfinder: Autonomous Robotics Navigation System
 
-A complete Deep Reinforcement Learning robotics system with real-time monitoring, training, and analytics dashboard.
+Neural Pathfinder is an advanced, production-grade autonomous robotics navigation platform developed to evaluate and deploy Deep Reinforcement Learning (DRL) agents in complex, simulated environments. The system integrates a robust ROS2-based simulation backplane with a high-fidelity React-based dashboard, orchestrated by a centralized FastAPI engine.
 
-## Project Structure
+## Executive Summary
 
-```
-Schrodinger-s-Bug/
-├── backend/          # FastAPI + ROS2 + TD3 DRL System
-├── frontend/         # React + Vite Dashboard Application
-└── README.md         # This file
-```
+The project provides a complete, end-to-end pipeline for DRL agent training, evaluation, and real-time monitoring. By bridging the gap between raw neural network inference and physical robotic control loops, Neural Pathfinder enables researchers and engineers to visualize internal model approximations (Policy, Value, and Q-functions) alongside spatial LiDAR topology.
 
-## Quick Start
+## Core Technological Pillars
 
-### Backend (DRL Robotics System)
+### 1. Simulation Framework
+- **Platform**: ROS2 Humble Hawksbill / Ubuntu 22.04 LTS via WSL2.
+- **Simulator**: Gazebo Classic with TurtleBot3 configuration.
+- **Sensor Integration**: 360-degree LiDAR, Odometry, and IMU data fused through the Rclpy middleware.
 
-The backend handles robot control, DRL training, and telemetry streaming.
+### 2. Deep Reinforcement Learning Core
+- **Framework**: PyTorch.
+- **Algorithms**:
+    - **PPO (Proximal Policy Optimization)**: Stochastic policy optimization with clipped surrogate loss for stable warehouse and logistics navigation.
+    - **TD3 (Twin Delayed DDPG)**: Deterministic policy optimization with twin critics for high-precision tactical defense operations.
+- **Architecture**: 24-input LiDAR state space, dual dense hidden layers (256 units), and continuous velocity control outputs.
 
-**Location**: `backend/`
+### 3. Operational Orchestrator
+- **Engine**: FastAPI / Python 3.10.
+- **Communication**: Low-latency WebSocket telemetry streaming at 10Hz.
+- **Process Management**: Automated WSLg display routing, ROS2 daemon management, and algorithmic process lifecycle control.
 
-**Technologies**:
-- Python 3.8+
-- FastAPI
-- ROS2 (Humble/Iron)
-- PyTorch (TD3 Algorithm)
-- WebSocket
+### 4. High-Wired Interface (HWI)
+- **Frontend**: React 19 / Vite.
+- **Visuals**: Framer Motion for tactical animations and Recharts for neural performance curves.
+- **Telemetry HUD**: Real-time RadarView (LiDAR), Neural Network Architecture Diagram, and Policy/Critic HUDs.
 
-**Setup**:
-```bash
-cd backend
-python -m venv venv
-source venv/bin/activate  # Windows: venv\Scripts\activate
-pip install -r requirements.txt
-```
+## System Orchestration
 
-**Run**:
-```bash
-uvicorn app:app --host 0.0.0.0 --port 8000 --reload
-```
+The platform features a proprietary "One-Click Ignition" sequence, managed via the `launch_system.sh` script.
 
-See [backend/README.md](backend/README.md) for detailed documentation.
+### Automated Sequence
+1. Initialization of the ROS2 Galactic/Humble environment within the WSL2 container.
+2. Spawning of the Gazebo world and the robotic agent.
+3. Dispatch of the selected DRL engine (PPO or TD3).
+4. Establishment of the FastAPI telemetry bridge and WebSocket uplink.
+5. Deployment of the React HWI for real-time operation.
 
----
+## Installation and Deployment
 
-### Frontend (Dashboard Application)
+### 1. Environment Requirements
+- Windows 10/11 with WSL2 (Ubuntu 22.04).
+- ROS2 Humble Desktop installed within the WSL2 distribution.
+- NVIDIA drivers configured for WSLg support if GPU acceleration is required.
 
-The frontend provides a modern React-based dashboard for monitoring and controlling the robot.
-
-**Location**: `frontend/`
-
-**Technologies**:
-- React 19
-- Vite
-- Tailwind CSS
-- Recharts
-- WebSocket
-
-**Setup**:
-```bash
-cd frontend
-npm install
-```
-
-**Run**:
-```bash
-npm run dev
-```
-
-See [frontend/README.md](frontend/README.md) for detailed documentation.
-
----
-
-## Architecture
-
-```
-┌─────────────┐         ┌──────────────┐         ┌─────────────┐
-│   Gazebo    │────────▶│  ROS2 Nodes  │────────▶│   FastAPI   │
-│ Simulation  │         │  (train.py)  │         │   Backend   │
-└─────────────┘         └──────────────┘         └──────┬──────┘
-                                                        │
-                                                   WebSocket
-                                                        │
-                                                        ▼
-                                               ┌──────────────┐
-                                               │   React      │
-                                               │  Frontend    │
-                                               └──────────────┘
-```
-
-## Features
-
-### Backend
-- TD3-based deep reinforcement learning
-- Real-time robot control via ROS2
-- LiDAR and odometry data processing
-- Training metrics collection
-- WebSocket telemetry streaming
-- Process lifecycle management
-
-### Frontend
-- Real-time dashboard with live metrics
-- Training progress visualization
-- Robot trajectory replay
-- Neural network architecture view
-- System logs monitoring
-- Analytics and performance charts
-
-## Development
-
-### Prerequisites
-
-- **Backend**:
-  - Python 3.8+
-  - ROS2 Humble/Iron
-  - WSL2 with Ubuntu 22.04 (Windows)
-  
-- **Frontend**:
-  - Node.js 18+
-  - npm or yarn
-
-### Running Locally
-
-1. **Start Backend**:
+### 2. Backend Setup
+1. Navigate to the `backend/` directory.
+2. Install the Python dependencies:
    ```bash
-   cd backend
-   uvicorn app:app --host 0.0.0.0 --port 8000 --reload
+   pip install -r requirements.txt
+   ```
+3. Source the ROS2 environment:
+   ```bash
+   source /opt/ros/humble/setup.bash
    ```
 
-2. **Start Frontend**:
+### 3. Frontend Setup
+1. Navigate to the `frontend/` directory.
+2. Install the Node.js dependencies:
    ```bash
-   cd frontend
-   npm run dev
+   npm install
    ```
 
-3. **Access Dashboard**:
-   Open `http://localhost:5173` in your browser
+### 4. Execution
+Run the unified launch script from the project root:
+```bash
+./launch_system.sh ppo  # For PPO Warehouse Logistics
+./launch_system.sh td3  # For TD3 Tactical Defense
+```
 
-## Repository Information
+## Team and Contributions
 
-- **Main Branch**: `main`
-- **Backend Folder**: Contains all Python/ROS2 code
-- **Frontend Folder**: Contains all React/Vite code
-- **Separation**: Clean separation between backend and frontend concerns
+The Neural Pathfinder project is the result of a collaborative development effort by the following engineers:
 
-## Contributing
+- **Pavan Hosatti**: Lead Developer for Warehouse Logistics and Intelligent Traffic DRL systems.
+- **Abhay**: Lead Developer for Tactical Defense Systems and TD3 algorithm integration.
+- **Rishita**: Specialist in Environment Synthesis and simulation world modeling.
+- **Sreejith Nair**: Lead Architect for Control Systems, System Integration, and HWI Dashboard.
 
-1. Fork the repository
-2. Create a feature branch (`git checkout -b feature/amazing-feature`)
-3. Commit your changes (`git commit -m 'Add amazing feature'`)
-4. Push to the branch (`git push origin feature/amazing-feature`)
-5. Open a Pull Request
+## Integrated Research Documentation
+
+The following research and deployment artifacts are integrated into the platform's ecosystem:
+
+- **Warehouse Simulation (GitHub)**: [Pavan-Hosatti/Warehouse-simulation](https://github.com/Pavan-Hosatti/Warehouse-simulation)
+- **Logistics Demo (Docker)**: [pavaninsights/warehouse-demo](https://hub.docker.com/r/pavaninsights/warehouse-demo)
+- **Tactical Defense (GitHub)**: [Abhay-aps001/drl_nav_project-Abhay](https://github.com/Abhay-aps001/drl_nav_project-Abhay)
+- **Defense Robot (Docker)**: [abhaydocx001/drl_nav_robot](https://hub.docker.com/r/abhaydocx001/drl_nav_robot)
+- **Traffic Optimization (Docker)**: [pavaninsights/traffic-drl](https://hub.docker.com/r/pavaninsights/traffic-drl)
 
 ## License
 
-This project is licensed under the MIT License.
-
-## Acknowledgments
-
-- DSAI Society, IIIT Dharwad
-- ROS2 Community
-- React and Vite Teams
-- PyTorch Team
+This project is licensed under the MIT License. All rights reserved by the DSAI Society, IIIT Dharwad.
